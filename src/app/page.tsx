@@ -20,6 +20,7 @@ export default function Home() {
           <Link href="/" className="text-sm font-medium hover:text-fila-green transition-colors">Inicio</Link>
           <Link href="/galeria" className="text-sm font-medium hover:text-fila-green transition-colors">Galería</Link>
           <Link href="/contacto" className="text-sm font-medium hover:text-fila-green transition-colors">Contacto</Link>
+          <Link href="/login" className="bg-fila-gold/10 text-fila-gold px-4 py-2 rounded-full text-xs font-bold hover:bg-fila-gold hover:text-white transition-all ml-4">ÁREA PRIVADA</Link>
         </div>
 
         <button className="md:hidden text-fila-green p-2 hover:bg-fila-green/10 rounded-full transition-colors">
