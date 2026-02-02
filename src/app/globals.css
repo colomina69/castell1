@@ -1,1 +1,50 @@
 @import "tailwindcss";
+
+@theme {
+  --color-fila-green: #749C3A;
+  --color-fila-gold: #D4AF37;
+  --color-fila-red: #9B4D44;
+  --color-fila-dark: #1A1A1A;
+  --color-fila-light: #F9F9F9;
+}
+
+:root {
+  --fila-green: #749C3A;
+  --fila-gold: #D4AF37;
+  --fila-red: #9B4D44;
+}
+
+body {
+  background-color: var(--color-fila-light);
+  color: var(--color-fila-dark);
+  font-family: 'Inter', sans-serif;
+}
+
+.gradient-gold {
+  background: linear-gradient(45deg, #D4AF37 0%, #F5D76E 50%, #D4AF37 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.shield-container {
+  overflow: hidden;
+  position: relative;
+}
+
+.shield-image {
+  /* Intentamos suavizar la transparencia manual con un clip-path tipo escudo */
+  clip-path: polygon(0% 0%, 100% 0%, 100% 80%, 50% 100%, 0% 80%);
+}
+
+.premium-card {
+  background: white;
+  border: 1px solid rgba(212, 175, 55, 0.2);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.premium-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 20px 40px -15px rgba(212, 175, 55, 0.2);
+  border-color: var(--color-fila-gold);
+}
