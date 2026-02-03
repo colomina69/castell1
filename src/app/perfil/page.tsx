@@ -5,8 +5,8 @@ import { supabase } from '@/lib/supabase';
 import { Shield } from '@/components/Shield';
 import { User, Mail, Phone, Calendar, LogOut, Loader2, Award, ShieldCheck, Euro } from 'lucide-react';
 import Link from 'next/link';
+import { Navbar } from '@/components/Navbar';
 import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 
 interface SocioData {
     id: string;
@@ -108,27 +108,7 @@ export default function PerfilPage() {
 
     return (
         <main className="min-h-screen bg-fila-light">
-            {/* Top Bar */}
-            <nav className="bg-white/80 backdrop-blur-md border-b border-fila-gold/20 px-6 py-4 flex justify-between items-center sticky top-0 z-50">
-                <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 relative">
-                        <Image
-                            src="/escudo.jpg"
-                            alt="Escudo"
-                            fill
-                            className="object-contain"
-                        />
-                    </div>
-                    <span className="font-black text-fila-dark tracking-tighter uppercase">ÁREA PERSONAL</span>
-                </div>
-                <button
-                    onClick={handleSignOut}
-                    className="flex items-center gap-2 text-sm font-bold text-red-600 hover:bg-red-50 px-4 py-2 rounded-full transition-all"
-                >
-                    <LogOut size={18} />
-                    <span className="hidden sm:inline">Cerrar Sesión</span>
-                </button>
-            </nav>
+            <Navbar showLogout onLogout={handleSignOut} />
 
             <div className="max-w-4xl mx-auto px-6 py-12">
                 {/* Profile Card */}

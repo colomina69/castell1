@@ -1,38 +1,12 @@
 import { Shield } from '@/components/Shield';
-import { Menu, Info, MapPin, Instagram, Facebook } from 'lucide-react';
+import { Info, MapPin, Instagram, Facebook } from 'lucide-react';
 import Link from 'next/link';
-import Image from 'next/image';
+import { Navbar } from '@/components/Navbar';
 
 export default function Home() {
   return (
     <main className="min-h-screen bg-fila-light selection:bg-fila-gold selection:text-white scroll-smooth">
-      {/* Header / Nav */}
-      <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-md border-b border-fila-gold/20 px-6 py-4 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 relative">
-            <Image
-              src="/escudo.jpg"
-              alt="Escudo"
-              fill
-              className="object-contain"
-            />
-          </div>
-          <span className="font-bold tracking-tight text-fila-dark uppercase text-sm">Moros del Castell</span>
-        </div>
-
-        {/* Desktop Menu */}
-        <div className="hidden md:flex items-center gap-8">
-          <Link href="/" className="text-sm font-medium hover:text-fila-green transition-colors">Inicio</Link>
-          <Link href="/historia" className="text-sm font-medium hover:text-fila-green transition-colors">Historia</Link>
-          <Link href="/galeria" className="text-sm font-medium hover:text-fila-green transition-colors">Galería</Link>
-          <Link href="/contacto" className="text-sm font-medium hover:text-fila-green transition-colors">Contacto</Link>
-          <Link href="/login" className="bg-fila-gold/10 text-fila-gold px-4 py-2 rounded-full text-xs font-bold hover:bg-fila-gold hover:text-white transition-all ml-4">ÁREA PRIVADA</Link>
-        </div>
-
-        <button className="md:hidden text-fila-green p-2 hover:bg-fila-green/10 rounded-full transition-colors">
-          <Menu size={24} />
-        </button>
-      </nav>
+      <Navbar />
 
       {/* Hero Section */}
       <section id="inicio" className="pt-32 pb-20 px-6 text-center relative overflow-hidden">

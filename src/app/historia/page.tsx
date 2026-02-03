@@ -6,7 +6,7 @@ import { Timeline } from '@/components/Timeline';
 import { Shield } from '@/components/Shield';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import Image from 'next/image';
+import { Navbar } from '@/components/Navbar';
 
 interface TimelineItem {
     year: string;
@@ -69,29 +69,7 @@ export default function HistoriaPage() {
 
     return (
         <main className="min-h-screen bg-fila-light">
-            {/* Navigation Header */}
-            <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-md border-b border-fila-gold/20 px-6 py-4 flex justify-between items-center">
-                <Link href="/" className="flex items-center gap-2 text-fila-green font-bold">
-                    <ArrowLeft size={20} />
-                    <span>Volver al inicio</span>
-                </Link>
-                <div className="flex items-center gap-6">
-                    <Link href="/" className="text-sm font-medium hover:text-fila-green transition-colors hidden md:block">Inicio</Link>
-                    <Link href="/galeria" className="text-sm font-medium hover:text-fila-green transition-colors hidden md:block">Galería</Link>
-                    <Link href="/contacto" className="text-sm font-medium hover:text-fila-green transition-colors">Contacto</Link>
-                    <div className="flex items-center gap-2 border-l border-fila-gold/20 pl-6">
-                        <div className="w-8 h-8 relative">
-                            <Image
-                                src="/escudo.jpg"
-                                alt="Escudo"
-                                fill
-                                className="object-contain"
-                            />
-                        </div>
-                        <span className="font-bold text-fila-dark text-sm hidden sm:inline uppercase">Història</span>
-                    </div>
-                </div>
-            </nav>
+            <Navbar />
 
             {/* Hero Header */}
             <section className="pt-32 pb-16 bg-white border-b border-fila-gold/10">

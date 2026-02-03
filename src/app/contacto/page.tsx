@@ -3,7 +3,7 @@
 import { Shield } from '@/components/Shield';
 import { Mail, Phone, MapPin, Instagram, Facebook, Send, ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-import Image from 'next/image';
+import { Navbar } from '@/components/Navbar';
 import { useState } from 'react';
 
 export default function ContactoPage() {
@@ -22,24 +22,7 @@ export default function ContactoPage() {
 
     return (
         <main className="min-h-screen bg-fila-light">
-            {/* Navigation Header */}
-            <nav className="fixed top-0 w-full z-50 bg-white/80 backdrop-blur-md border-b border-fila-gold/20 px-6 py-4 flex justify-between items-center">
-                <Link href="/" className="flex items-center gap-2 text-fila-green font-bold">
-                    <ArrowLeft size={20} />
-                    <span>Volver al inicio</span>
-                </Link>
-                <div className="flex items-center gap-2">
-                    <div className="w-8 h-8 relative">
-                        <Image
-                            src="/escudo.jpg"
-                            alt="Escudo"
-                            fill
-                            className="object-contain"
-                        />
-                    </div>
-                    <span className="font-bold text-fila-dark text-sm hidden sm:inline uppercase">Contacto</span>
-                </div>
-            </nav>
+            <Navbar />
 
             <section className="pt-32 pb-20 px-6">
                 <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-16 items-start">
