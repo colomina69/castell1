@@ -4,6 +4,7 @@ import { Gallery } from '@/components/Gallery';
 import { Shield } from '@/components/Shield';
 import { ArrowLeft, Camera } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function GaleriaPage() {
     return (
@@ -20,10 +21,14 @@ export default function GaleriaPage() {
                     <Link href="/contacto" className="text-sm font-medium hover:text-fila-green transition-colors">Contacto</Link>
                     <div className="flex items-center gap-2 border-l border-fila-gold/20 pl-6">
                         <div className="w-8 h-8 relative">
-                            <div className="absolute inset-0 bg-fila-green rounded-full opacity-10" />
-                            <div className="w-full h-full text-fila-green font-bold flex items-center justify-center text-xs">FMC</div>
+                            <Image
+                                src="/escudo.jpg"
+                                alt="Escudo"
+                                fill
+                                className="object-contain"
+                            />
                         </div>
-                        <span className="font-bold text-fila-dark text-sm hidden sm:inline">Galeria</span>
+                        <span className="font-bold text-fila-dark text-sm hidden sm:inline uppercase">Galeria</span>
                     </div>
                 </div>
             </nav>

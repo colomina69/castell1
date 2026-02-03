@@ -3,6 +3,7 @@
 import { Shield } from '@/components/Shield';
 import { Mail, Phone, MapPin, Instagram, Facebook, Send, ArrowLeft, Loader2 } from 'lucide-react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useState } from 'react';
 
 export default function ContactoPage() {
@@ -29,10 +30,14 @@ export default function ContactoPage() {
                 </Link>
                 <div className="flex items-center gap-2">
                     <div className="w-8 h-8 relative">
-                        <div className="absolute inset-0 bg-fila-green rounded-full opacity-10" />
-                        <div className="w-full h-full text-fila-green font-bold flex items-center justify-center text-xs">FMC</div>
+                        <Image
+                            src="/escudo.jpg"
+                            alt="Escudo"
+                            fill
+                            className="object-contain"
+                        />
                     </div>
-                    <span className="font-bold text-fila-dark text-sm hidden sm:inline">Portal de Contacto</span>
+                    <span className="font-bold text-fila-dark text-sm hidden sm:inline uppercase">Contacto</span>
                 </div>
             </nav>
 

@@ -3,21 +3,40 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Shield } from '@/components/Shield';
-import { User, Mail, Phone, Calendar, LogOut, Loader2, Award, ShieldCheck } from 'lucide-react';
+import { User, Mail, Phone, Calendar, LogOut, Loader2, Award, ShieldCheck, Euro } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import Image from 'next/image';
 
 interface SocioData {
+    id: string;
     nombre: string;
     primer_apellido: string;
     segundo_apellido: string;
     email: string;
     telefono: string;
     fecha_nacimiento: string;
+    cuota_id: string | null;
+}
+
+interface Quota {
+    nombre: string;
+    monto: number;
+}
+
+interface Transaction {
+    id: string;
+    tipo: 'cobro' | 'pago';
+    monto: number;
+    concepto: string;
+    fecha: string;
+    estado: 'pendiente' | 'completado' | 'cancelado';
 }
 
 export default function PerfilPage() {
     const [socio, setSocio] = useState<SocioData | null>(null);
+    const [quota, setQuota] = useState<Quota | null>(null);
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [isAdmin, setIsAdmin] = useState(false);
     const [loading, setLoading] = useState(true);
     const router = useRouter();
@@ -49,6 +68,24 @@ export default function PerfilPage() {
 
             if (data) {
                 setSocio(data);
+
+                // Fetch Quota Details
+                if (data.cuota_id) {
+                    const { data: qData } = await supabase
+                        .from('cuotas')
+                        .select('nombre, monto')
+                        .eq('id', data.cuota_id)
+                        .single();
+                    if (qData) setQuota(qData);
+                }
+
+                // Fetch Transactions
+                const { data: tData } = await supabase
+                    .from('pagos_cobros')
+                    .select('*')
+                    .eq('socio_id', data.id)
+                    .order('fecha', { ascending: false });
+                if (tData) setTransactions(tData);
             }
             setLoading(false);
         };
@@ -73,9 +110,16 @@ export default function PerfilPage() {
         <main className="min-h-screen bg-fila-light">
             {/* Top Bar */}
             <nav className="bg-white/80 backdrop-blur-md border-b border-fila-gold/20 px-6 py-4 flex justify-between items-center sticky top-0 z-50">
-                <div className="flex items-center gap-2">
-                    <ShieldCheck size={24} className="text-fila-green" />
-                    <span className="font-black text-fila-dark tracking-tighter">ÁREA PERSONAL</span>
+                <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 relative">
+                        <Image
+                            src="/escudo.jpg"
+                            alt="Escudo"
+                            fill
+                            className="object-contain"
+                        />
+                    </div>
+                    <span className="font-black text-fila-dark tracking-tighter uppercase">ÁREA PERSONAL</span>
                 </div>
                 <button
                     onClick={handleSignOut}
@@ -131,12 +175,10 @@ export default function PerfilPage() {
                                         </Link>
                                     )}
                                     <div className="bg-fila-light px-6 py-3 rounded-2xl text-center">
-                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">Puntos</p>
-                                        <p className="text-2xl font-black text-fila-dark leading-none">0</p>
-                                    </div>
-                                    <div className="bg-fila-light px-6 py-3 rounded-2xl text-center">
-                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">Cuotas</p>
-                                        <p className="text-2xl font-black text-fila-green leading-none">OK</p>
+                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">Cuota</p>
+                                        <p className="text-xl font-black text-fila-green leading-none whitespace-nowrap">
+                                            {quota ? quota.nombre : 'Sin asignar'}
+                                        </p>
                                     </div>
                                 </div>
                             </div>
@@ -174,30 +216,60 @@ export default function PerfilPage() {
                                 </div>
                             </div>
 
-                            <div className="p-6 bg-fila-gold/5 rounded-3xl border border-fila-gold/10 flex items-center gap-5">
-                                <div className="w-12 h-12 rounded-2xl bg-fila-gold text-white shadow-sm flex items-center justify-center">
-                                    <ShieldCheck size={20} />
-                                </div>
-                                <div>
-                                    <p className="text-[10px] font-bold text-fila-gold uppercase tracking-widest mb-0.5">Filà</p>
-                                    <p className="font-black text-fila-dark">MOROS DEL CASTELL</p>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Action Panel */}
-                <div className="mt-12 grid sm:grid-cols-2 gap-6">
-                    <button className="bg-fila-dark text-white p-8 rounded-[40px] text-left hover:bg-black transition-all shadow-xl group relative overflow-hidden">
-                        <div className="absolute -right-4 -bottom-4 opacity-10 group-hover:scale-110 transition-transform">
-                            <Award size={100} />
+                {/* History Panel */}
+                <div className="mt-12 bg-white rounded-[40px] shadow-2xl border border-fila-gold/10 overflow-hidden">
+                    <div className="p-8 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-fila-dark flex items-center justify-center text-white">
+                                <Calendar size={18} />
+                            </div>
+                            <h3 className="text-xl font-black text-fila-dark tracking-tighter uppercase">Historial de Cuotas y Pagos</h3>
                         </div>
-                        <h3 className="text-xl font-bold mb-2">Historial de Cuotas</h3>
-                        <p className="text-white/60 text-sm">Próximamente: Consulta tus recibos y estado de pagos.</p>
-                    </button>
+                    </div>
 
-                    <button className="bg-white text-fila-dark p-8 rounded-[40px] text-left hover:border-fila-gold/30 border border-fila-gold/10 shadow-xl group relative overflow-hidden transition-all">
+                    <div className="divide-y divide-gray-100">
+                        {transactions.length > 0 ? (
+                            transactions.map((t) => (
+                                <div key={t.id} className="p-6 hover:bg-fila-light/30 transition-all flex items-center justify-between gap-4">
+                                    <div className="flex items-center gap-4">
+                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.tipo === 'pago' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
+                                            <Euro size={16} />
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-fila-dark">{t.concepto}</p>
+                                            <p className="text-xs text-gray-400">
+                                                {new Date(t.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className={`font-black text-lg ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
+                                            {t.tipo === 'pago' ? '+' : '-'}{t.monto}€
+                                        </p>
+                                        <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${t.estado === 'completado' ? 'bg-green-50 text-green-600' :
+                                            t.estado === 'pendiente' ? 'bg-orange-50 text-orange-600' :
+                                                'bg-gray-50 text-gray-400'
+                                            }`}>
+                                            {t.estado}
+                                        </span>
+                                    </div>
+                                </div>
+                            ))
+                        ) : (
+                            <div className="p-12 text-center">
+                                <p className="text-gray-400 font-medium Italics">No hay movimientos registrados.</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Event Panel (Placeholder) */}
+                <div className="mt-8">
+                    <button className="w-full bg-white text-fila-dark p-8 rounded-[40px] text-left hover:border-fila-gold/30 border border-fila-gold/10 shadow-xl group relative overflow-hidden transition-all">
                         <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-110 transition-transform text-fila-gold">
                             <ShieldCheck size={100} />
                         </div>
