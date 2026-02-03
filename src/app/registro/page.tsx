@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Shield } from '@/components/Shield';
-import { Mail, Lock, Loader2, ArrowRight, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Mail, Lock, Loader2, ArrowRight, AlertCircle, CheckCircle2, X } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -12,13 +12,25 @@ export default function RegistroPage() {
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [showErrorCard, setShowErrorCard] = useState(false);
     const [success, setSuccess] = useState(false);
     const router = useRouter();
+
+    useEffect(() => {
+        if (showErrorCard) {
+            const timer = setTimeout(() => {
+                setShowErrorCard(false);
+                router.push('/');
+            }, 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [showErrorCard, router]);
 
     const handleRegistro = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
+        setShowErrorCard(false);
 
         try {
             // 1. Validar si el email está en la tabla de socios
@@ -29,7 +41,9 @@ export default function RegistroPage() {
                 .single();
 
             if (socioError || !socio) {
-                throw new Error('Lo sentimos, este correo no figura en nuestra lista oficial de socios. Contacta con la directiva.');
+                setShowErrorCard(true);
+                setLoading(false);
+                return;
             }
 
             // 2. Intentar el registro en Supabase Auth
@@ -55,7 +69,7 @@ export default function RegistroPage() {
 
     if (success) {
         return (
-            <main className="min-h-screen bg-fila-light flex items-center justify-center p-6">
+            <main className="min-h-screen bg-fila-light flex items-center justify-center p-6 text-left">
                 <div className="max-w-md w-full bg-white rounded-[40px] p-12 shadow-2xl text-center">
                     <div className="w-20 h-20 bg-fila-green/10 text-fila-green rounded-full flex items-center justify-center mx-auto mb-6">
                         <CheckCircle2 size={40} />
@@ -74,7 +88,25 @@ export default function RegistroPage() {
     }
 
     return (
-        <main className="min-h-screen bg-fila-light flex items-center justify-center p-6">
+        <main className="min-h-screen bg-fila-light flex items-center justify-center p-6 relative">
+            {/* Notification Card */}
+            {showErrorCard && (
+                <div className="fixed top-10 left-1/2 -translate-x-1/2 w-full max-w-sm z-[100] animate-in fade-in slide-in-from-top-4 duration-300">
+                    <div className="bg-white rounded-3xl shadow-2xl border-2 border-red-500 p-6 flex items-start gap-4 mx-4 sm:mx-0">
+                        <div className="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center text-red-600 shrink-0">
+                            <AlertCircle size={24} />
+                        </div>
+                        <div className="flex-1 text-left">
+                            <h3 className="font-black text-fila-dark tracking-tighter uppercase mb-1">Registro no permitido</h3>
+                            <p className="text-sm text-gray-500 leading-tight">Su email no figura como socio. Por favor, póngase en contacto con la Junta Directiva.</p>
+                        </div>
+                        <button onClick={() => setShowErrorCard(false)} className="text-gray-300 hover:text-gray-500 transition-colors">
+                            <X size={18} />
+                        </button>
+                    </div>
+                </div>
+            )}
+
             <div className="max-w-md w-full bg-white rounded-[40px] p-8 md:p-12 shadow-2xl relative overflow-hidden">
                 <div className="absolute top-0 right-0 p-8 opacity-5">
                     <Shield />

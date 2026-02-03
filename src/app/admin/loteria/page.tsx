@@ -2,28 +2,33 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Check, Save, Euro, LayoutDashboard, Ticket, LogOut, MoreVertical } from 'lucide-react';
+import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Ticket, LayoutDashboard, Euro, LogOut, MoreVertical } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 
-interface Quota {
+interface Sorteo {
     id: string;
-    nombre: string;
-    monto: number;
-    descripcion: string | null;
+    descripcion: string;
+    precio: number;
+    recargo: number;
+    serie: string | null;
+    numero: string | null;
+    created_at: string;
 }
 
-export default function QuotasAdmin() {
-    const [quotas, setQuotas] = useState<Quota[]>([]);
+export default function LoteriaAdmin() {
+    const [sorteos, setSorteos] = useState<Sorteo[]>([]);
     const [loading, setLoading] = useState(true);
     const [isAdmin, setIsAdmin] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [editingQuota, setEditingQuota] = useState<Quota | null>(null);
+    const [editingSorteo, setEditingSorteo] = useState<Sorteo | null>(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [formData, setFormData] = useState({
-        nombre: '',
-        monto: '',
-        descripcion: ''
+        descripcion: '',
+        precio: '',
+        recargo: '',
+        serie: '',
+        numero: ''
     });
 
     const router = useRouter();
@@ -52,31 +57,33 @@ export default function QuotasAdmin() {
         }
 
         setIsAdmin(true);
-        fetchQuotas();
+        fetchSorteos();
     };
 
-    const fetchQuotas = async () => {
+    const fetchSorteos = async () => {
         setLoading(true);
         const { data, error } = await supabase
-            .from('cuotas')
+            .from('sorteos')
             .select('*')
-            .order('monto', { ascending: true });
+            .order('created_at', { ascending: false });
 
-        if (data) setQuotas(data);
+        if (data) setSorteos(data);
         setLoading(false);
     };
 
-    const handleOpenModal = (quota: Quota | null = null) => {
-        if (quota) {
-            setEditingQuota(quota);
+    const handleOpenModal = (sorteo: Sorteo | null = null) => {
+        if (sorteo) {
+            setEditingSorteo(sorteo);
             setFormData({
-                nombre: quota.nombre,
-                monto: quota.monto.toString(),
-                descripcion: quota.descripcion || ''
+                descripcion: sorteo.descripcion,
+                precio: sorteo.precio.toString(),
+                recargo: sorteo.recargo.toString(),
+                serie: sorteo.serie || '',
+                numero: sorteo.numero || ''
             });
         } else {
-            setEditingQuota(null);
-            setFormData({ nombre: '', monto: '', descripcion: '' });
+            setEditingSorteo(null);
+            setFormData({ descripcion: '', precio: '20', recargo: '3', serie: '', numero: '' });
         }
         setIsModalOpen(true);
     };
@@ -85,53 +92,55 @@ export default function QuotasAdmin() {
         e.preventDefault();
         setLoading(true);
 
-        const quotaData = {
-            nombre: formData.nombre,
-            monto: parseFloat(formData.monto),
-            descripcion: formData.descripcion
+        const sorteoData = {
+            descripcion: formData.descripcion,
+            precio: parseFloat(formData.precio),
+            recargo: parseFloat(formData.recargo),
+            serie: formData.serie || null,
+            numero: formData.numero || null
         };
 
         let error;
-        if (editingQuota) {
+        if (editingSorteo) {
             ({ error } = await supabase
-                .from('cuotas')
-                .update(quotaData)
-                .eq('id', editingQuota.id));
+                .from('sorteos')
+                .update(sorteoData)
+                .eq('id', editingSorteo.id));
         } else {
             ({ error } = await supabase
-                .from('cuotas')
-                .insert([quotaData]));
+                .from('sorteos')
+                .insert([sorteoData]));
         }
 
         if (!error) {
             setIsModalOpen(false);
-            fetchQuotas();
+            fetchSorteos();
         } else {
-            alert('Error al guardar la cuota');
+            alert('Error al guardar el sorteo');
             setLoading(false);
         }
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('¿Estás seguro de que quieres eliminar esta cuota?')) return;
+        if (!confirm('¿Estás seguro de que quieres eliminar este sorteo? Se eliminarán también las asignaciones asociadas.')) return;
 
         const { error } = await supabase
-            .from('cuotas')
+            .from('sorteos')
             .delete()
             .eq('id', id);
 
         if (!error) {
-            fetchQuotas();
+            fetchSorteos();
         } else {
-            alert('Error al eliminar la cuota. Puede que esté asignada a algún socio.');
+            alert('Error al eliminar el sorteo');
         }
     };
 
-    if (!isAdmin || (loading && quotas.length === 0)) {
+    if (!isAdmin || (loading && sorteos.length === 0)) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-fila-light">
                 <Loader2 className="w-12 h-12 text-fila-gold animate-spin mb-4" />
-                <p className="text-fila-dark font-bold">Cargando Sistema de Cuotas...</p>
+                <p className="text-fila-dark font-bold">Cargando Gestión de Lotería...</p>
             </div>
         );
     }
@@ -218,8 +227,8 @@ export default function QuotasAdmin() {
                             <MoreVertical size={20} />
                         </button>
                         <div className="flex items-center gap-4">
-                            <Euro size={24} className="text-fila-gold" />
-                            <h1 className="text-lg md:text-xl font-black text-fila-dark tracking-tighter uppercase">Gestión de Cuotas</h1>
+                            <Ticket size={24} className="text-fila-gold" />
+                            <h1 className="text-lg md:text-xl font-black text-fila-dark tracking-tighter uppercase">Gestión de Lotería</h1>
                         </div>
                     </div>
                     <button
@@ -227,47 +236,78 @@ export default function QuotasAdmin() {
                         className="p-2.5 md:px-5 md:py-2.5 bg-fila-green text-white rounded-xl md:rounded-2xl hover:bg-fila-green/90 transition-all shadow-xl shadow-fila-green/10 flex items-center gap-2"
                     >
                         <Plus size={18} />
-                        <span className="hidden md:inline text-sm font-black uppercase tracking-tight">Nueva Cuota</span>
+                        <span className="hidden md:inline text-sm font-black uppercase tracking-tight">Nuevo Sorteo</span>
                     </button>
                 </nav>
 
-                <div className="p-4 md:p-8 max-w-5xl mx-auto">
+                <div className="p-4 md:p-8 max-w-6xl mx-auto">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                        {quotas.map((quota) => (
-                            <div key={quota.id} className="bg-white p-6 rounded-[32px] border border-gray-200 shadow-sm hover:shadow-md transition-all group">
-                                <div className="flex justify-between items-start mb-4">
+                        {sorteos.map((sorteo) => (
+                            <div key={sorteo.id} className="bg-white p-6 rounded-[32px] border border-gray-200 shadow-sm hover:shadow-md transition-all group relative overflow-hidden">
+                                <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none text-fila-gold">
+                                    <Ticket size={80} />
+                                </div>
+
+                                <div className="flex justify-between items-start mb-4 relative z-10">
                                     <div className="p-3 bg-fila-light rounded-2xl text-fila-gold shadow-sm">
-                                        <Euro size={24} />
+                                        <Ticket size={24} />
                                     </div>
                                     <div className="flex gap-1 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button
-                                            onClick={() => handleOpenModal(quota)}
+                                            onClick={() => handleOpenModal(sorteo)}
                                             className="p-2 text-gray-400 hover:text-fila-gold hover:bg-fila-gold/10 rounded-lg transition-all"
                                         >
                                             <Edit2 size={16} />
                                         </button>
                                         <button
-                                            onClick={() => handleDelete(quota.id)}
+                                            onClick={() => handleDelete(sorteo.id)}
                                             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                                         >
                                             <Trash2 size={16} />
                                         </button>
                                     </div>
                                 </div>
-                                <h3 className="text-lg font-black text-fila-dark uppercase tracking-tight mb-1">{quota.nombre}</h3>
-                                <p className="text-3xl font-black text-fila-gold mb-3">{quota.monto}€</p>
-                                <p className="text-sm text-gray-500 line-clamp-2 leading-relaxed">{quota.descripcion || 'Sin descripción adicional'}</p>
+
+                                <div className="relative z-10">
+                                    <h3 className="text-lg font-black text-fila-dark uppercase tracking-tight mb-3 leading-tight">{sorteo.descripcion}</h3>
+
+                                    <div className="grid grid-cols-2 gap-4 mb-4">
+                                        <div className="bg-gray-50 p-2.5 rounded-2xl">
+                                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">Precio</p>
+                                            <p className="text-lg font-black text-fila-dark">{sorteo.precio}€</p>
+                                        </div>
+                                        <div className="bg-fila-gold/5 p-2.5 rounded-2xl">
+                                            <p className="text-[10px] font-bold text-fila-gold uppercase tracking-widest mb-1">Recargo</p>
+                                            <p className="text-lg font-black text-fila-gold">{sorteo.recargo}€</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between items-center text-sm border-b border-gray-100 pb-2">
+                                            <span className="text-gray-400 font-bold uppercase text-[10px] tracking-widest">Número</span>
+                                            <span className="font-black text-fila-dark">{sorteo.numero || '---'}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center text-sm border-b border-gray-100 pb-2">
+                                            <span className="text-gray-400 font-bold uppercase text-[10px] tracking-widest">Serie</span>
+                                            <span className="font-black text-fila-dark">{sorteo.serie || '---'}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center pt-2">
+                                            <span className="text-fila-dark font-black uppercase text-xs tracking-widest">Total/Décimo</span>
+                                            <span className="text-xl font-black text-fila-dark">{sorteo.precio + sorteo.recargo}€</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         ))}
                     </div>
 
-                    {quotas.length === 0 && !loading && (
+                    {sorteos.length === 0 && !loading && (
                         <div className="text-center py-20">
                             <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400">
-                                <Euro size={40} />
+                                <Ticket size={40} />
                             </div>
-                            <h3 className="text-xl font-bold text-gray-600">No hay cuotas definidas</h3>
-                            <p className="text-gray-400 mt-2">Empieza creando una nueva cuota para los socios.</p>
+                            <h3 className="text-xl font-bold text-gray-600">No hay sorteos creados</h3>
+                            <p className="text-gray-400 mt-2">Empieza creando el primer sorteo de lotería.</p>
                         </div>
                     )}
                 </div>
@@ -275,10 +315,10 @@ export default function QuotasAdmin() {
                 {/* Modal */}
                 {isModalOpen && (
                     <div className="fixed inset-0 z-[80] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
-                        <div className="bg-white w-full max-w-md rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                        <div className="bg-white w-full max-w-lg rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
                             <div className="px-8 py-7 md:px-10 md:py-8 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
                                 <h2 className="text-xl font-black text-fila-dark tracking-tighter uppercase">
-                                    {editingQuota ? 'Editar Cuota' : 'Nueva Cuota'}
+                                    {editingSorteo ? 'Editar Sorteo' : 'Nuevo Sorteo'}
                                 </h2>
                                 <button onClick={() => setIsModalOpen(false)} className="p-2 text-gray-400 hover:bg-gray-100 rounded-full text-fila-dark transition-all">
                                     <X size={20} />
@@ -286,37 +326,67 @@ export default function QuotasAdmin() {
                             </div>
                             <form onSubmit={handleSubmit} className="p-8 md:p-10 space-y-6">
                                 <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nombre de la Cuota</label>
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Descripción del Sorteo</label>
                                     <input
                                         required
-                                        placeholder="Ej: Cuota General"
-                                        value={formData.nombre}
-                                        onChange={e => setFormData({ ...formData, nombre: e.target.value })}
+                                        placeholder="Ej: Lotería de Navidad 2024"
+                                        value={formData.descripcion}
+                                        onChange={e => setFormData({ ...formData, descripcion: e.target.value })}
                                         className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold"
                                     />
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Monto (€)</label>
-                                    <input
-                                        required
-                                        type="number"
-                                        step="0.01"
-                                        placeholder="0.00"
-                                        value={formData.monto}
-                                        onChange={e => setFormData({ ...formData, monto: e.target.value })}
-                                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-black text-2xl text-fila-dark"
-                                    />
+
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Precio Décimo (€)</label>
+                                        <input
+                                            required
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.precio}
+                                            onChange={e => setFormData({ ...formData, precio: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-black text-lg text-fila-dark"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Recargo/Dono (€)</label>
+                                        <input
+                                            required
+                                            type="number"
+                                            step="0.01"
+                                            value={formData.recargo}
+                                            onChange={e => setFormData({ ...formData, recargo: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-black text-lg text-fila-gold"
+                                        />
+                                    </div>
                                 </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Descripción</label>
-                                    <textarea
-                                        rows={3}
-                                        placeholder="Opcional..."
-                                        value={formData.descripcion}
-                                        onChange={e => setFormData({ ...formData, descripcion: e.target.value })}
-                                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all resize-none font-medium"
-                                    />
+
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Número</label>
+                                        <input
+                                            placeholder="Ej: 15420"
+                                            value={formData.numero}
+                                            onChange={e => setFormData({ ...formData, numero: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-black text-2xl tracking-[0.2em] text-fila-dark text-center"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Serie</label>
+                                        <input
+                                            placeholder="Ej: 14"
+                                            value={formData.serie}
+                                            onChange={e => setFormData({ ...formData, serie: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-black text-lg text-center"
+                                        />
+                                    </div>
                                 </div>
+
+                                <div className="bg-fila-dark p-5 rounded-3xl text-white flex justify-between items-center shadow-inner">
+                                    <span className="font-black text-[10px] uppercase tracking-widest opacity-60">Total/décimo:</span>
+                                    <span className="text-3xl font-black">{(parseFloat(formData.precio || '0') + parseFloat(formData.recargo || '0')).toFixed(2)}€</span>
+                                </div>
+
                                 <div className="pt-4 flex gap-4">
                                     <button
                                         type="button"
@@ -331,7 +401,7 @@ export default function QuotasAdmin() {
                                         className="flex-[2] px-4 py-4 rounded-2xl bg-fila-dark text-white font-black hover:bg-black transition-all shadow-xl shadow-fila-dark/20 flex items-center justify-center gap-2 text-xs tracking-widest uppercase"
                                     >
                                         {loading ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
-                                        {editingQuota ? 'ACTUALIZAR' : 'GUARDAR'}
+                                        {editingSorteo ? 'ACTUALIZAR' : 'GUARDAR SORTEO'}
                                     </button>
                                 </div>
                             </form>
