@@ -402,9 +402,8 @@ export default function AdminDashboard() {
                 </div>
 
                 <nav className="flex-1 space-y-2">
-                    <NavItem href="/admin" icon={LayoutDashboard} label="Gestión Socios" />
-                    <NavItem href="/admin/cuotas" icon={Euro} label="Configurar Cuotas" />
                     <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
+                    <NavItem href="/admin/eventos" icon={LayoutDashboard} label="Gestión Eventos" />
                 </nav>
 
                 <div className="pt-6 border-t border-gray-100 space-y-2">
