@@ -211,21 +211,25 @@ export default function PerfilPage() {
         // Group transactions by category and sub-group
         const categories = Array.from(new Set(transactions.map(t => t.categoria || 'Varios')));
 
-        const getSubGroupName = (t: Transaction) => {
-            if (t.categoria === 'Evento') {
-                const name = t.concepto.replace('Inscripción ', '').split(':')[1]?.split('(')[0]?.trim();
-                return name || 'Otros Eventos';
+        const getSubGroupName = (concepto: string, categoria: string) => {
+            let name = String(concepto || '');
+            let previousName;
+            do {
+                previousName = name;
+                name = name.replace(/^Abono parcial:\s*/i, '');
+                name = name.replace(/^Inscripción Evento:\s*/i, '');
+                name = name.replace(/^Lotería:\s*/i, '');
+            } while (name !== previousName);
+
+            if (categoria === 'Evento' || categoria === 'Lotería') {
+                return name.split('(')[0].trim() || (categoria === 'Evento' ? 'Otros Eventos' : 'Otros Sorteos');
             }
-            if (t.categoria === 'Lotería') {
-                const name = t.concepto.split(':')[1]?.split('-')[0]?.trim();
-                return name || 'Otros Sorteos';
-            }
-            return t.categoria || 'Varios';
+            return categoria || 'Varios';
         };
 
         categories.forEach(cat => {
             const catTransactions = transactions.filter(t => (t.categoria || 'Varios') === cat);
-            const subGroups = Array.from(new Set(catTransactions.map(t => getSubGroupName(t))));
+            const subGroups = Array.from(new Set(catTransactions.map(t => getSubGroupName(t.concepto, t.categoria || 'Varios'))));
 
             doc.setFontSize(14);
             doc.setTextColor(184, 153, 76);
@@ -233,7 +237,7 @@ export default function PerfilPage() {
             finalY += 10;
 
             subGroups.forEach(subG => {
-                const subTransactions = catTransactions.filter(t => getSubGroupName(t) === subG);
+                const subTransactions = catTransactions.filter(t => getSubGroupName(t.concepto, t.categoria || 'Varios') === subG);
                 const subTotalCobro = subTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
                 const subTotalPago = subTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
                 const subPendiente = Math.max(0, subTotalCobro - subTotalPago);
@@ -253,7 +257,7 @@ export default function PerfilPage() {
                     t.concepto,
                     t.metodo_pago || (t.tipo === 'cobro' ? '-' : '---'),
                     t.estado === 'completado' ? 'LIQUIDADO' : t.estado.toUpperCase(),
-                    `${t.tipo === 'pago' ? '+' : '-'}${Number(t.monto).toFixed(2)}€`
+                    `${t.tipo === 'pago' ? '-' : '+'}${Number(t.monto).toFixed(2)}€`
                 ]);
 
                 autoTable(doc, {
@@ -505,19 +509,23 @@ export default function PerfilPage() {
                             Array.from(new Set(transactions.map(t => t.categoria || 'Varios'))).map(cat => {
                                 const catTransactions = transactions.filter(t => (t.categoria || 'Varios') === cat);
 
-                                const getSubGroupName = (t: Transaction) => {
-                                    if (t.categoria === 'Evento') {
-                                        const name = t.concepto.replace('Inscripción ', '').split(':')[1]?.split('(')[0]?.trim();
-                                        return name || 'Otros Eventos';
-                                    }
-                                    if (t.categoria === 'Lotería') {
-                                        const name = t.concepto.split(':')[1]?.split('-')[0]?.trim();
-                                        return name || 'Otros Sorteos';
+                                const getSubGroupName = (concepto: string, categoria: string) => {
+                                    let name = String(concepto || '');
+                                    let previousName;
+                                    do {
+                                        previousName = name;
+                                        name = name.replace(/^Abono parcial:\s*/i, '');
+                                        name = name.replace(/^Inscripción Evento:\s*/i, '');
+                                        name = name.replace(/^Lotería:\s*/i, '');
+                                    } while (name !== previousName);
+
+                                    if (categoria === 'Evento' || categoria === 'Lotería') {
+                                        return name.split('(')[0].trim() || (categoria === 'Evento' ? 'Otros Eventos' : 'Otros Sorteos');
                                     }
                                     return null; // Don't sub-group others (Cuotas)
                                 };
 
-                                const subGroups = Array.from(new Set(catTransactions.map(t => getSubGroupName(t))));
+                                const subGroups = Array.from(new Set(catTransactions.map(t => getSubGroupName(t.concepto, t.categoria || 'Varios'))));
 
                                 return (
                                     <div key={cat} className="animate-in fade-in duration-500">
@@ -526,7 +534,7 @@ export default function PerfilPage() {
                                         </div>
                                         <div className="divide-y divide-gray-100">
                                             {subGroups.map(subG => {
-                                                const subTransactions = catTransactions.filter(t => getSubGroupName(t) === subG);
+                                                const subTransactions = catTransactions.filter(t => getSubGroupName(t.concepto, t.categoria || 'Varios') === subG);
                                                 const subTotalCobro = subTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
                                                 const subTotalPago = subTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
                                                 const subPendiente = Math.max(0, subTotalCobro - subTotalPago);
@@ -565,7 +573,7 @@ export default function PerfilPage() {
                                                                     </div>
                                                                     <div className="text-right">
                                                                         <p className={`font-black text-base ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
-                                                                            {t.tipo === 'pago' ? '+' : '-'}{Number(t.monto).toFixed(2)}€
+                                                                            {t.tipo === 'pago' ? '-' : '+'}{Number(t.monto).toFixed(2)}€
                                                                         </p>
                                                                         <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${t.estado === 'completado' ? 'bg-green-50 text-green-600' :
                                                                             t.estado === 'pendiente' ? 'bg-orange-50 text-orange-600' :

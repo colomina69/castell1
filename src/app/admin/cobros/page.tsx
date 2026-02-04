@@ -259,7 +259,8 @@ export default function CobrosAdmin() {
         e.preventDefault();
         if (!payingSocio) return;
 
-        const cargo = cargosData[payingSocio.socio_id];
+        const cargoId = payingSocio.cargo_id || payingSocio.socio_id;
+        const cargo = cargosData[cargoId];
         if (!cargo) return;
 
         const amount = parseFloat(paymentAmount);
@@ -298,14 +299,15 @@ export default function CobrosAdmin() {
                     .eq('id', cargo.id);
             }
 
-            setCargosData({
-                ...cargosData,
-                [payingSocio.socio_id]: {
-                    ...cargo,
-                    pagado: newPagado,
-                    estado: isFullyPaid ? 'completado' : 'pendiente'
-                }
-            });
+            // Refresh data from server to ensure everything is in sync
+            if (activeTab === 'loteria' && selectedSorteo) {
+                handleSelectSorteo(selectedSorteo);
+            } else if (activeTab === 'eventos' && selectedEvento) {
+                handleSelectEvento(selectedEvento);
+            } else if (activeTab === 'cuotas') {
+                fetchDebtsAndPayments('Cuota');
+            }
+
             setPayingSocio(null);
             setPaymentAmount('');
         } else {
@@ -388,8 +390,8 @@ export default function CobrosAdmin() {
         setProcessingId(null);
     };
 
-    const handleDeleteCharge = async (socio: any) => {
-        const cargo = cargosData[socio.socio_id];
+    const handleDeleteCharge = async (socio: any, cargoIdKey: string) => {
+        const cargo = cargosData[cargoIdKey];
         if (!cargo || !confirm('¿Estás seguro de eliminar este cargo pendiente?')) return;
 
         setProcessingId(activeTab === 'loteria' ? socio.id : socio.socio_id);
@@ -399,9 +401,13 @@ export default function CobrosAdmin() {
             .eq('id', cargo.id);
 
         if (!error) {
-            const newData = { ...cargosData };
-            delete newData[socio.socio_id];
-            setCargosData(newData);
+            if (activeTab === 'loteria' && selectedSorteo) {
+                handleSelectSorteo(selectedSorteo);
+            } else if (activeTab === 'eventos' && selectedEvento) {
+                handleSelectEvento(selectedEvento);
+            } else if (activeTab === 'cuotas') {
+                fetchDebtsAndPayments('Cuota');
+            }
         } else {
             alert('Error al eliminar cargo: ' + error.message);
         }
@@ -656,7 +662,11 @@ export default function CobrosAdmin() {
                                                                             </div>
                                                                             <div className="flex gap-1">
                                                                                 <button
-                                                                                    onClick={() => { setPayingSocio({ socio_id: socioId, nombre: name }); setPaymentAmount((cargo.monto - cargo.pagado).toString()); }}
+                                                                                    onClick={() => {
+                                                                                        const cargoKey = (activeTab === 'loteria' && item.pago_id) ? item.pago_id : socioId;
+                                                                                        setPayingSocio({ socio_id: socioId, cargo_id: cargoKey, nombre: name });
+                                                                                        setPaymentAmount((cargo.monto - cargo.pagado).toString());
+                                                                                    }}
                                                                                     disabled={isProcessing}
                                                                                     title="Realizar Liquidación"
                                                                                     className="p-3 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all shadow-sm"
@@ -665,7 +675,10 @@ export default function CobrosAdmin() {
                                                                                 </button>
                                                                                 {cargo.pagado === 0 && (
                                                                                     <button
-                                                                                        onClick={() => handleDeleteCharge({ socio_id: socioId } as any)}
+                                                                                        onClick={() => {
+                                                                                            const cargoKey = (activeTab === 'loteria' && item.pago_id) ? item.pago_id : socioId;
+                                                                                            handleDeleteCharge({ ...item, socio_id: socioId }, cargoKey);
+                                                                                        }}
                                                                                         disabled={isProcessing}
                                                                                         title="Eliminar Cargo"
                                                                                         className="p-3 bg-red-50 text-red-300 hover:text-red-500 hover:bg-red-100 rounded-xl transition-all"
@@ -726,15 +739,15 @@ export default function CobrosAdmin() {
                                 <div className="p-6 bg-gray-50 rounded-3xl space-y-3">
                                     <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-widest">
                                         <span>Total Deuda</span>
-                                        <span className="text-fila-dark font-black">{cargosData[payingSocio.socio_id]?.monto.toFixed(2)}€</span>
+                                        <span className="text-fila-dark font-black">{cargosData[payingSocio.cargo_id || payingSocio.socio_id]?.monto.toFixed(2)}€</span>
                                     </div>
                                     <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-widest">
                                         <span>Ya abonado</span>
-                                        <span className="text-fila-green font-black">{cargosData[payingSocio.socio_id]?.pagado.toFixed(2)}€</span>
+                                        <span className="text-fila-green font-black">{cargosData[payingSocio.cargo_id || payingSocio.socio_id]?.pagado.toFixed(2)}€</span>
                                     </div>
                                     <div className="pt-3 border-t border-gray-200 flex justify-between items-center uppercase tracking-widest">
                                         <span className="text-[10px] font-black text-fila-gold">Remanente</span>
-                                        <span className="text-lg font-black text-red-500">{(cargosData[payingSocio.socio_id]?.monto - cargosData[payingSocio.socio_id]?.pagado).toFixed(2)}€</span>
+                                        <span className="text-lg font-black text-red-500">{(cargosData[payingSocio.cargo_id || payingSocio.socio_id]?.monto - cargosData[payingSocio.cargo_id || payingSocio.socio_id]?.pagado).toFixed(2)}€</span>
                                     </div>
                                 </div>
 
