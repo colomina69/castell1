@@ -208,53 +208,76 @@ export default function PerfilPage() {
 
         let finalY = 60;
 
-        // Group transactions by category
+        // Group transactions by category and sub-group
         const categories = Array.from(new Set(transactions.map(t => t.categoria || 'Varios')));
+
+        const getSubGroupName = (t: Transaction) => {
+            if (t.categoria === 'Evento') {
+                const name = t.concepto.replace('Inscripción ', '').split(':')[1]?.split('(')[0]?.trim();
+                return name || 'Otros Eventos';
+            }
+            if (t.categoria === 'Lotería') {
+                const name = t.concepto.split(':')[1]?.split('-')[0]?.trim();
+                return name || 'Otros Sorteos';
+            }
+            return t.categoria || 'Varios';
+        };
 
         categories.forEach(cat => {
             const catTransactions = transactions.filter(t => (t.categoria || 'Varios') === cat);
-            const catTotalCobro = catTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
-            const catTotalPago = catTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
-            const catPendiente = Math.max(0, catTotalCobro - catTotalPago);
+            const subGroups = Array.from(new Set(catTransactions.map(t => getSubGroupName(t))));
 
-            doc.setFontSize(12);
+            doc.setFontSize(14);
             doc.setTextColor(184, 153, 76);
             doc.text(cat.toUpperCase(), 20, finalY);
+            finalY += 10;
 
-            // If there's a subtotal, show it next to the category name
-            if (catPendiente > 0) {
-                doc.setFontSize(9);
-                doc.setTextColor(255, 0, 0);
-                doc.text(`(Pendiente: ${catPendiente.toFixed(2)}€)`, 190, finalY, { align: 'right' });
-            }
+            subGroups.forEach(subG => {
+                const subTransactions = catTransactions.filter(t => getSubGroupName(t) === subG);
+                const subTotalCobro = subTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
+                const subTotalPago = subTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
+                const subPendiente = Math.max(0, subTotalCobro - subTotalPago);
 
-            const tableData = catTransactions.map(t => [
-                new Date(t.fecha).toLocaleDateString('es-ES'),
-                t.concepto,
-                t.metodo_pago || (t.tipo === 'cobro' ? '-' : '---'),
-                t.estado === 'completado' ? 'LIQUIDADO' : t.estado.toUpperCase(),
-                `${t.tipo === 'pago' ? '+' : '-'}${Number(t.monto).toFixed(2)}€`
-            ]);
+                doc.setFontSize(11);
+                doc.setTextColor(33, 37, 41);
+                doc.text(subG, 25, finalY);
 
-            autoTable(doc, {
-                startY: finalY + 5,
-                head: [['Fecha', 'Concepto', 'Método', 'Estado', 'Monto']],
-                body: tableData,
-                theme: 'grid',
-                headStyles: { fillColor: [26, 26, 26], textColor: [184, 153, 76], fontStyle: 'bold' },
-                styles: { fontSize: 9, cellPadding: 3 },
-                columnStyles: {
-                    4: { halign: 'right', fontStyle: 'bold' }
+                if (subPendiente > 0) {
+                    doc.setFontSize(9);
+                    doc.setTextColor(255, 0, 0);
+                    doc.text(`(Pendiente: ${subPendiente.toFixed(2)}€)`, 190, finalY, { align: 'right' });
+                }
+
+                const tableData = subTransactions.map(t => [
+                    new Date(t.fecha).toLocaleDateString('es-ES'),
+                    t.concepto,
+                    t.metodo_pago || (t.tipo === 'cobro' ? '-' : '---'),
+                    t.estado === 'completado' ? 'LIQUIDADO' : t.estado.toUpperCase(),
+                    `${t.tipo === 'pago' ? '+' : '-'}${Number(t.monto).toFixed(2)}€`
+                ]);
+
+                autoTable(doc, {
+                    startY: finalY + 2,
+                    head: [['Fecha', 'Concepto', 'Método', 'Estado', 'Monto']],
+                    body: tableData,
+                    theme: 'grid',
+                    headStyles: { fillColor: [26, 26, 26], textColor: [184, 153, 76], fontStyle: 'bold' },
+                    styles: { fontSize: 8, cellPadding: 2 },
+                    margin: { left: 25 },
+                    columnStyles: {
+                        4: { halign: 'right', fontStyle: 'bold' }
+                    }
+                });
+
+                finalY = (doc as any).lastAutoTable.finalY + 10;
+
+                if (finalY > 260) {
+                    doc.addPage();
+                    finalY = 20;
                 }
             });
 
-            finalY = (doc as any).lastAutoTable.finalY + 15;
-
-            // Check if we need a new page
-            if (finalY > 250 && cat !== categories[categories.length - 1]) {
-                doc.addPage();
-                finalY = 20;
-            }
+            finalY += 5;
         });
 
         // Totals summary
@@ -481,53 +504,82 @@ export default function PerfilPage() {
                         {transactions.length > 0 ? (
                             Array.from(new Set(transactions.map(t => t.categoria || 'Varios'))).map(cat => {
                                 const catTransactions = transactions.filter(t => (t.categoria || 'Varios') === cat);
-                                const catTotalCobro = catTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
-                                const catTotalPago = catTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
-                                const catPendiente = Math.max(0, catTotalCobro - catTotalPago);
+
+                                const getSubGroupName = (t: Transaction) => {
+                                    if (t.categoria === 'Evento') {
+                                        const name = t.concepto.replace('Inscripción ', '').split(':')[1]?.split('(')[0]?.trim();
+                                        return name || 'Otros Eventos';
+                                    }
+                                    if (t.categoria === 'Lotería') {
+                                        const name = t.concepto.split(':')[1]?.split('-')[0]?.trim();
+                                        return name || 'Otros Sorteos';
+                                    }
+                                    return null; // Don't sub-group others (Cuotas)
+                                };
+
+                                const subGroups = Array.from(new Set(catTransactions.map(t => getSubGroupName(t))));
 
                                 return (
                                     <div key={cat} className="animate-in fade-in duration-500">
                                         <div className="px-8 py-3 bg-fila-light/30 border-y border-gray-100/50 flex justify-between items-center">
                                             <h4 className="text-[10px] font-black text-fila-gold uppercase tracking-[0.2em]">{cat}</h4>
-                                            {catPendiente > 0 && (
-                                                <span className="text-[9px] font-black text-red-500 uppercase tracking-widest bg-red-50 px-2 py-0.5 rounded-full border border-red-100">
-                                                    Pendiente: {catPendiente.toFixed(2)}€
-                                                </span>
-                                            )}
                                         </div>
                                         <div className="divide-y divide-gray-100">
-                                            {catTransactions.map((t) => (
-                                                <div key={t.id} className="p-6 hover:bg-fila-light/20 transition-all flex items-center justify-between gap-4">
-                                                    <div className="flex items-center gap-4">
-                                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.tipo === 'pago' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
-                                                            <Euro size={16} />
-                                                        </div>
-                                                        <div>
-                                                            <p className="font-bold text-fila-dark">{t.concepto}</p>
-                                                            <p className="text-xs text-gray-400 flex items-center gap-2">
-                                                                {new Date(t.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
-                                                                {t.tipo === 'pago' && t.metodo_pago && (
-                                                                    <>
-                                                                        <span className="w-1 h-1 rounded-full bg-gray-300"></span>
-                                                                        <span className="text-fila-gold font-black uppercase text-[9px] tracking-widest">{t.metodo_pago}</span>
-                                                                    </>
+                                            {subGroups.map(subG => {
+                                                const subTransactions = catTransactions.filter(t => getSubGroupName(t) === subG);
+                                                const subTotalCobro = subTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
+                                                const subTotalPago = subTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
+                                                const subPendiente = Math.max(0, subTotalCobro - subTotalPago);
+
+                                                return (
+                                                    <div key={subG || 'root'} className="bg-white">
+                                                        {subG && (
+                                                            <div className="px-10 py-2 flex justify-between items-center border-b border-gray-50 bg-gray-50/20">
+                                                                <span className="text-[9px] font-bold text-fila-dark uppercase tracking-widest">{subG}</span>
+                                                                {subPendiente > 0 && (
+                                                                    <span className="text-[8px] font-black text-red-500 uppercase tracking-widest">
+                                                                        Pendiente: {subPendiente.toFixed(2)}€
+                                                                    </span>
                                                                 )}
-                                                            </p>
+                                                            </div>
+                                                        )}
+                                                        <div className="divide-y divide-gray-50">
+                                                            {subTransactions.map((t) => (
+                                                                <div key={t.id} className="p-6 hover:bg-fila-light/20 transition-all flex items-center justify-between gap-4">
+                                                                    <div className="flex items-center gap-4">
+                                                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.tipo === 'pago' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
+                                                                            <Euro size={16} />
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="font-bold text-fila-dark text-sm">{t.concepto}</p>
+                                                                            <p className="text-[10px] text-gray-400 flex items-center gap-2">
+                                                                                {new Date(t.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
+                                                                                {t.tipo === 'pago' && t.metodo_pago && (
+                                                                                    <>
+                                                                                        <span className="w-1 h-1 rounded-full bg-gray-300"></span>
+                                                                                        <span className="text-fila-gold font-black uppercase text-[8px] tracking-widest">{t.metodo_pago}</span>
+                                                                                    </>
+                                                                                )}
+                                                                            </p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="text-right">
+                                                                        <p className={`font-black text-base ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
+                                                                            {t.tipo === 'pago' ? '+' : '-'}{Number(t.monto).toFixed(2)}€
+                                                                        </p>
+                                                                        <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${t.estado === 'completado' ? 'bg-green-50 text-green-600' :
+                                                                            t.estado === 'pendiente' ? 'bg-orange-50 text-orange-600' :
+                                                                                'bg-gray-50 text-gray-400'
+                                                                            }`}>
+                                                                            {t.estado}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
                                                         </div>
                                                     </div>
-                                                    <div className="text-right">
-                                                        <p className={`font-black text-lg ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
-                                                            {t.tipo === 'pago' ? '+' : '-'}{Number(t.monto).toFixed(2)}€
-                                                        </p>
-                                                        <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${t.estado === 'completado' ? 'bg-green-50 text-green-600' :
-                                                            t.estado === 'pendiente' ? 'bg-orange-50 text-orange-600' :
-                                                                'bg-gray-50 text-gray-400'
-                                                            }`}>
-                                                            {t.estado}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
                                         </div>
                                     </div>
                                 );
