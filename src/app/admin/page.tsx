@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Shield, Search, UserPlus, Edit2, Trash2, UserCheck, Loader2, ArrowLeft, MoreVertical, X, Check, Mail, Phone, Euro, Ticket, Save, LayoutDashboard, Settings, LogOut, Calendar, Users, Info } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
+import { AdminSidebar } from '@/components/AdminSidebar';
 
 interface Socio {
     id: string;
@@ -16,6 +17,9 @@ interface Socio {
     fecha_nacimiento: string | null;
     is_active: boolean;
     cuota_id: string | null;
+    loteria_mensual_extra: number;
+    se_queda_loteria_mensual: boolean;
+    loteria_especial_extra: number;
 }
 
 interface Quota {
@@ -97,7 +101,10 @@ export default function AdminDashboard() {
         email: '',
         telefono: '',
         fecha_nacimiento: '',
-        cuota_id: ''
+        cuota_id: '',
+        loteria_mensual_extra: 0,
+        se_queda_loteria_mensual: false,
+        loteria_especial_extra: 0
     });
 
     useEffect(() => {
@@ -226,6 +233,9 @@ export default function AdminDashboard() {
                 telefono: createForm.telefono || null,
                 fecha_nacimiento: createForm.fecha_nacimiento || null,
                 cuota_id: createForm.cuota_id || null,
+                loteria_mensual_extra: Number(createForm.loteria_mensual_extra),
+                se_queda_loteria_mensual: createForm.se_queda_loteria_mensual,
+                loteria_especial_extra: Number(createForm.loteria_especial_extra),
                 is_active: true
             }]);
 
@@ -239,7 +249,10 @@ export default function AdminDashboard() {
                 email: '',
                 telefono: '',
                 fecha_nacimiento: '',
-                cuota_id: ''
+                cuota_id: '',
+                loteria_mensual_extra: 0,
+                se_queda_loteria_mensual: false,
+                loteria_especial_extra: 0
             });
             fetchSocios();
         } else {
@@ -262,6 +275,9 @@ export default function AdminDashboard() {
                 telefono: editingSocio.telefono,
                 fecha_nacimiento: editingSocio.fecha_nacimiento,
                 cuota_id: editingSocio.cuota_id,
+                loteria_mensual_extra: Number(editingSocio.loteria_mensual_extra),
+                se_queda_loteria_mensual: editingSocio.se_queda_loteria_mensual,
+                loteria_especial_extra: Number(editingSocio.loteria_especial_extra),
             })
             .eq('id', editingSocio.id);
 
@@ -441,77 +457,9 @@ export default function AdminDashboard() {
         );
     }
 
-    const NavItem = ({ href, icon: Icon, label }: { href: string; icon: any; label: string }) => {
-        const isActive = pathname === href;
-        return (
-            <Link
-                href={href}
-                className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${isActive ? 'bg-fila-gold text-white shadow-lg shadow-fila-gold/20' : 'text-gray-500 hover:bg-fila-light hover:text-fila-dark'}`}
-            >
-                <Icon size={20} />
-                <span>{label}</span>
-            </Link>
-        );
-    };
-
     return (
         <main className="min-h-screen bg-[#F8F9FA] flex">
-            {/* Mobile Sidebar Overlay */}
-            {isMenuOpen && (
-                <div
-                    className="fixed inset-0 bg-fila-dark/40 backdrop-blur-sm z-[60] lg:hidden animate-in fade-in duration-300"
-                    onClick={() => setIsMenuOpen(false)}
-                />
-            )}
-
-            {/* Side Menu */}
-            <aside className={`
-                fixed inset-y-0 left-0 w-72 bg-white border-r border-gray-200 z-[70] flex flex-col p-6 transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0
-                ${isMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}
-            `}>
-                <div className="flex items-center justify-between mb-10 px-2">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-fila-dark rounded-xl flex items-center justify-center text-fila-gold shadow-lg shadow-fila-dark/20">
-                            <Shield size={24} />
-                        </div>
-                        <div>
-                            <p className="text-xs font-black text-fila-gold uppercase tracking-[0.2em]">Panel Admin</p>
-                            <h2 className="text-lg font-black text-fila-dark leading-none">CASTELL</h2>
-                        </div>
-                    </div>
-                    <button onClick={() => setIsMenuOpen(false)} className="lg:hidden p-2 text-gray-400 hover:bg-gray-100 rounded-xl transition-all">
-                        <X size={20} />
-                    </button>
-                </div>
-
-                <nav className="flex-1 space-y-2">
-                    <NavItem href="/admin" icon={Users} label="Gestión Socios" />
-                    <NavItem href="/admin/cobros" icon={Euro} label="Gestión Cobros" />
-                    <NavItem href="/admin/cuotas" icon={Euro} label="Configurar Cuotas" />
-                    <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
-                    <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
-                </nav>
-
-                <div className="pt-6 border-t border-gray-100 space-y-2">
-                    <Link
-                        href="/perfil"
-                        className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-gray-500 hover:bg-gray-50 transition-all"
-                    >
-                        <ArrowLeft size={20} />
-                        <span>Volver al Perfil</span>
-                    </Link>
-                    <button
-                        onClick={async () => {
-                            await supabase.auth.signOut();
-                            router.push('/');
-                        }}
-                        className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-red-500 hover:bg-red-50 transition-all w-full text-left"
-                    >
-                        <LogOut size={20} />
-                        <span>Cerrar Sesión</span>
-                    </button>
-                </div>
-            </aside>
+            <AdminSidebar isMenuOpen={isMenuOpen} setIsMenuOpen={setIsMenuOpen} />
 
             {/* Content Area */}
             <div className="flex-1">
@@ -738,7 +686,7 @@ export default function AdminDashboard() {
                                                         </button>
                                                     </td>
                                                     <td className="px-6 py-5 text-right">
-                                                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <div className="flex justify-end gap-1 transition-all">
                                                             <button
                                                                 onClick={() => setLoteriaSocio(s)}
                                                                 title="Asignar Lotería"
@@ -915,6 +863,46 @@ export default function AdminDashboard() {
                                                 <option key={q.id} value={q.id}>{q.nombre} ({q.monto}€)</option>
                                             ))}
                                         </select>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-gray-50 rounded-3xl border border-gray-100">
+                                    <div className="flex items-center gap-3">
+                                        <input
+                                            type="checkbox"
+                                            id="create_loteria_mensual"
+                                            checked={createForm.se_queda_loteria_mensual}
+                                            onChange={e => setCreateForm({ ...createForm, se_queda_loteria_mensual: e.target.checked })}
+                                            className="w-5 h-5 accent-fila-gold rounded-lg"
+                                        />
+                                        <label htmlFor="create_loteria_mensual" className="text-[10px] font-black text-fila-dark uppercase tracking-widest cursor-pointer">¿Se queda lotería mensual?</label>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1 text-right block">Décimos Extra Mensuales</label>
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            disabled={!createForm.se_queda_loteria_mensual}
+                                            value={createForm.loteria_mensual_extra}
+                                            onChange={e => setCreateForm({ ...createForm, loteria_mensual_extra: parseInt(e.target.value) || 0 })}
+                                            className={`w-full px-5 py-2 rounded-xl border border-gray-200 outline-none font-bold text-center ${!createForm.se_queda_loteria_mensual ? 'opacity-30' : 'focus:border-fila-gold'}`}
+                                            placeholder="0"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="p-5 bg-fila-gold/5 rounded-3xl border border-fila-gold/10">
+                                    <label className="text-[10px] font-black text-fila-gold uppercase tracking-widest ml-1 block mb-2">Lotería para Vender (Navidad/Niño)</label>
+                                    <div className="flex items-center gap-4">
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={createForm.loteria_especial_extra}
+                                            onChange={e => setCreateForm({ ...createForm, loteria_especial_extra: parseInt(e.target.value) || 0 })}
+                                            className="flex-1 px-5 py-3 rounded-2xl border border-fila-gold/20 focus:border-fila-gold outline-none font-black text-center text-lg"
+                                            placeholder="Décimos a mayores..."
+                                        />
+                                        <p className="flex-1 text-[10px] font-bold text-gray-400 uppercase leading-tight">Cantidad de décimos adicionales que vende en sorteos especiales.</p>
                                     </div>
                                 </div>
 
@@ -1151,15 +1139,54 @@ export default function AdminDashboard() {
                                     </select>
                                 </div>
 
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Email</label>
-                                    <input
-                                        type="email"
-                                        value={editingSocio.email || ''}
-                                        onChange={e => setEditingSocio({ ...editingSocio, email: e.target.value })}
-                                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all"
-                                        placeholder="correo@ejemplo.com"
-                                    />
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Email</label>
+                                        <input
+                                            type="email"
+                                            value={editingSocio.email || ''}
+                                            onChange={e => setEditingSocio({ ...editingSocio, email: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all"
+                                            placeholder="correo@ejemplo.com"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4 p-5 bg-gray-50 rounded-3xl border border-gray-100">
+                                        <div className="flex items-center gap-3">
+                                            <input
+                                                type="checkbox"
+                                                id="edit_loteria_mensual"
+                                                checked={editingSocio.se_queda_loteria_mensual}
+                                                onChange={e => setEditingSocio({ ...editingSocio, se_queda_loteria_mensual: e.target.checked })}
+                                                className="w-5 h-5 accent-fila-gold rounded-lg"
+                                            />
+                                            <label htmlFor="edit_loteria_mensual" className="text-[10px] font-black text-fila-dark uppercase tracking-widest cursor-pointer">Lotería Mensual</label>
+                                        </div>
+                                        <div className="space-y-1.5">
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                disabled={!editingSocio.se_queda_loteria_mensual}
+                                                value={editingSocio.loteria_mensual_extra}
+                                                onChange={e => setEditingSocio({ ...editingSocio, loteria_mensual_extra: parseInt(e.target.value) || 0 })}
+                                                className={`w-full px-5 py-2 rounded-xl border border-gray-200 outline-none font-bold text-center ${!editingSocio.se_queda_loteria_mensual ? 'opacity-30' : 'focus:border-fila-gold'}`}
+                                            />
+                                            <label className="text-[8px] font-black text-gray-400 uppercase tracking-widest block text-center mt-1">Extra Mensual</label>
+                                        </div>
+                                    </div>
+
+                                    <div className="p-5 bg-fila-gold/5 rounded-3xl border border-fila-gold/10 flex items-center gap-4">
+                                        <div className="flex-1">
+                                            <label className="text-[10px] font-black text-fila-gold uppercase tracking-widest ml-1 block mb-1">Venta Especiales</label>
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                value={editingSocio.loteria_especial_extra}
+                                                onChange={e => setEditingSocio({ ...editingSocio, loteria_especial_extra: parseInt(e.target.value) || 0 })}
+                                                className="w-full px-5 py-2 rounded-xl border border-fila-gold/20 focus:border-fila-gold outline-none font-black text-center"
+                                            />
+                                        </div>
+                                        <p className="flex-1 text-[8px] font-bold text-gray-400 uppercase leading-tight text-right">Décimos adicionales para vender en Navidad/Niño.</p>
+                                    </div>
                                 </div>
 
                                 <div className="pt-4 flex gap-3">

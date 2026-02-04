@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
+import { AdminSidebar } from '@/components/AdminSidebar';
 
 interface Evento {
     id: string;
@@ -66,10 +67,12 @@ export default function CobrosAdmin() {
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [processingId, setProcessingId] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const [showSettled, setShowSettled] = useState(false);
 
     // Partial payment modal
     const [payingSocio, setPayingSocio] = useState<any | null>(null);
     const [paymentAmount, setPaymentAmount] = useState<string>('');
+    const [paymentMethod, setPaymentMethod] = useState<'Contado' | 'Transferencia'>('Contado');
 
     const router = useRouter();
     const pathname = usePathname();
@@ -277,7 +280,7 @@ export default function CobrosAdmin() {
                 concepto: `Abono parcial: ${cargo.concepto}`,
                 categoria: activeTab === 'eventos' ? 'Evento' : activeTab === 'cuotas' ? 'Cuota' : 'Lotería',
                 estado: 'completado',
-                metodo_pago: 'Efectivo',
+                metodo_pago: paymentMethod,
                 parent_id: cargo.id
             }])
             .select()
@@ -414,64 +417,27 @@ export default function CobrosAdmin() {
         );
     }
 
-    const NavItem = ({ href, icon: Icon, label }: { href: string; icon: any; label: string }) => {
-        const isActive = pathname === href;
-        return (
-            <Link
-                href={href}
-                className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${isActive ? 'bg-fila-gold text-white shadow-lg shadow-fila-gold/20' : 'text-gray-500 hover:bg-fila-light hover:text-fila-dark'}`}
-            >
-                <Icon size={20} />
-                <span>{label}</span>
-            </Link>
-        );
-    };
-
     const filteredInscripciones = inscripciones.filter(ins =>
         `${ins.socios.nombre} ${ins.socios.primer_apellido}`.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
+    // Calculation of totals
+    const currentList = activeTab === 'eventos' ? filteredInscripciones : activeTab === 'cuotas' ? socios : loterias;
+    const totals = currentList.reduce((acc, item) => {
+        const socioId = activeTab === 'eventos' ? item.socio_id : activeTab === 'cuotas' ? item.id : item.socio_id;
+        const cargo = (activeTab === 'loteria' && item.pago_id) ? cargosData[item.pago_id] : cargosData[socioId];
+
+        if (cargo) {
+            acc.total += cargo.monto;
+            acc.cobrado += cargo.pagado;
+            acc.pendiente += (cargo.monto - cargo.pagado);
+        }
+        return acc;
+    }, { total: 0, cobrado: 0, pendiente: 0 });
+
     return (
         <main className="min-h-screen bg-[#F8F9FA] flex">
-            {/* Side Menu */}
-            <aside className={`
-                fixed inset-y-0 left-0 w-72 bg-white border-r border-gray-200 z-[70] flex flex-col p-6 transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0
-                ${isMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}
-            `}>
-                <div className="flex items-center justify-between mb-10 px-2">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-fila-dark rounded-xl flex items-center justify-center text-fila-gold">
-                            <Shield size={24} />
-                        </div>
-                        <div>
-                            <p className="text-xs font-black text-fila-gold uppercase tracking-[0.2em]">Panel Admin</p>
-                            <h2 className="text-lg font-black text-fila-dark leading-none">CASTELL</h2>
-                        </div>
-                    </div>
-                </div>
-
-                <nav className="flex-1 space-y-2">
-                    <NavItem href="/admin" icon={Users} label="Gestión Socios" />
-                    <NavItem href="/admin/cobros" icon={Euro} label="Gestión Cobros" />
-                    <NavItem href="/admin/cuotas" icon={Euro} label="Configurar Cuotas" />
-                    <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
-                    <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
-                </nav>
-
-                <div className="pt-6 border-t border-gray-100 space-y-2">
-                    <Link href="/perfil" className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-gray-500 hover:bg-gray-50 transition-all">
-                        <ArrowLeft size={20} />
-                        <span>Volver al Perfil</span>
-                    </Link>
-                    <button
-                        onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}
-                        className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-red-500 hover:bg-red-50 transition-all w-full text-left"
-                    >
-                        <LogOut size={20} />
-                        <span>Cerrar Sesión</span>
-                    </button>
-                </div>
-            </aside>
+            <AdminSidebar isMenuOpen={isMenuOpen} setIsMenuOpen={setIsMenuOpen} />
 
             {/* Content Area */}
             <div className="flex-1 flex flex-col">
@@ -570,7 +536,7 @@ export default function CobrosAdmin() {
                         ) : (
                             <>
                                 <div className="p-8 border-b border-gray-50 bg-fila-light/30">
-                                    <div className="flex justify-between items-center mb-6">
+                                    <div className="flex justify-between items-start mb-6">
                                         <div>
                                             <h3 className="text-2xl font-black text-fila-dark tracking-tighter uppercase whitespace-nowrap">
                                                 {activeTab === 'eventos' ? selectedEvento?.denominacion : activeTab === 'cuotas' ? 'Cuotas Anuales 2026' : 'Lotería de Navidad'}
@@ -581,15 +547,38 @@ export default function CobrosAdmin() {
                                         </div>
                                     </div>
 
-                                    <div className="relative">
-                                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                                        <input
-                                            type="text"
-                                            placeholder={`Buscar por nombre de socio...`}
-                                            value={searchTerm}
-                                            onChange={e => setSearchTerm(e.target.value)}
-                                            className="w-full pl-12 pr-6 py-4 rounded-2xl bg-white border border-gray-100 focus:border-fila-gold outline-none font-bold text-sm shadow-sm"
-                                        />
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                                        <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-center">
+                                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total {activeTab === 'loteria' ? 'Sorteo' : 'Categoría'}</p>
+                                            <p className="text-2xl font-black text-fila-dark">{totals.total.toFixed(2)}€</p>
+                                        </div>
+                                        <div className="bg-green-50 p-5 rounded-3xl border border-green-100 shadow-sm flex flex-col justify-center">
+                                            <p className="text-[10px] font-black text-green-600/60 uppercase tracking-widest mb-1">Ya Cobrado</p>
+                                            <p className="text-2xl font-black text-green-600">{totals.cobrado.toFixed(2)}€</p>
+                                        </div>
+                                        <div className="bg-orange-50 p-5 rounded-3xl border border-orange-100 shadow-sm flex flex-col justify-center">
+                                            <p className="text-[10px] font-black text-orange-600/60 uppercase tracking-widest mb-1">Pendiente</p>
+                                            <p className="text-2xl font-black text-orange-600">{totals.pendiente.toFixed(2)}€</p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex flex-col md:flex-row gap-4">
+                                        <div className="relative flex-1">
+                                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                            <input
+                                                type="text"
+                                                placeholder={`Buscar por nombre de socio...`}
+                                                value={searchTerm}
+                                                onChange={e => setSearchTerm(e.target.value)}
+                                                className="w-full pl-12 pr-6 py-4 rounded-2xl bg-white border border-gray-100 focus:border-fila-gold outline-none font-bold text-sm shadow-sm"
+                                            />
+                                        </div>
+                                        <button
+                                            onClick={() => setShowSettled(!showSettled)}
+                                            className={`px-6 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all border-2 ${showSettled ? 'bg-fila-dark text-white border-fila-dark' : 'bg-white text-gray-400 border-gray-100 hover:border-gray-200'}`}
+                                        >
+                                            {showSettled ? 'Ocultar Saldados' : 'Ver Todos'}
+                                        </button>
                                     </div>
                                 </div>
 
@@ -600,17 +589,19 @@ export default function CobrosAdmin() {
                                         </div>
                                     ) : (
                                         <div className="space-y-4">
-                                            {/* Unified List Rendering for all tabs */}
                                             {(activeTab === 'eventos' ? filteredInscripciones : activeTab === 'cuotas' ? socios : loterias).filter(item => {
+                                                const name = activeTab === 'eventos' ? `${item.socios.nombre} ${item.socios.primer_apellido}` : activeTab === 'cuotas' ? `${item.nombre} ${item.primer_apellido}` : `${item.socios.nombre} ${item.socios.primer_apellido}`;
+                                                if (!name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+
                                                 const socioId = activeTab === 'eventos' ? item.socio_id : activeTab === 'cuotas' ? item.id : item.socio_id;
                                                 const cargo = (activeTab === 'loteria' && item.pago_id) ? cargosData[item.pago_id] : cargosData[socioId];
 
-                                                // Only show if no cargo exists yet, OR if it's NOT completed
-                                                const isPending = !cargo || cargo.estado !== 'completado';
-                                                if (!isPending) return false;
-
-                                                const name = activeTab === 'eventos' ? `${item.socios.nombre} ${item.socios.primer_apellido}` : activeTab === 'cuotas' ? `${item.nombre} ${item.primer_apellido}` : `${item.socios.nombre} ${item.socios.primer_apellido}`;
-                                                return name.toLowerCase().includes(searchTerm.toLowerCase());
+                                                // Filter by showSettled
+                                                if (!showSettled) {
+                                                    const isPending = !cargo || cargo.estado !== 'completado';
+                                                    return isPending;
+                                                }
+                                                return true;
                                             }).map(item => {
                                                 const socioId = activeTab === 'eventos' ? item.socio_id : activeTab === 'cuotas' ? item.id : item.socio_id;
                                                 const cargo = (activeTab === 'loteria' && item.pago_id) ? cargosData[item.pago_id] : cargosData[socioId];
@@ -744,6 +735,26 @@ export default function CobrosAdmin() {
                                     <div className="pt-3 border-t border-gray-200 flex justify-between items-center uppercase tracking-widest">
                                         <span className="text-[10px] font-black text-fila-gold">Remanente</span>
                                         <span className="text-lg font-black text-red-500">{(cargosData[payingSocio.socio_id]?.monto - cargosData[payingSocio.socio_id]?.pagado).toFixed(2)}€</span>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Método de pago</label>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={() => setPaymentMethod('Contado')}
+                                            className={`py-3.5 rounded-2xl border-2 font-black text-[10px] uppercase tracking-widest transition-all ${paymentMethod === 'Contado' ? 'bg-fila-dark border-fila-dark text-white' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}
+                                        >
+                                            Contado
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => setPaymentMethod('Transferencia')}
+                                            className={`py-3.5 rounded-2xl border-2 font-black text-[10px] uppercase tracking-widest transition-all ${paymentMethod === 'Transferencia' ? 'bg-fila-dark border-fila-dark text-white' : 'border-gray-100 text-gray-400 hover:border-gray-200'}`}
+                                        >
+                                            Transferencia
+                                        </button>
                                     </div>
                                 </div>
 

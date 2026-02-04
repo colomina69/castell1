@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Ticket, LayoutDashboard, Euro, LogOut, MoreVertical, Calendar, Search, Users } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
+import { AdminSidebar } from '@/components/AdminSidebar';
 
 interface Sorteo {
     id: string;
@@ -13,6 +14,7 @@ interface Sorteo {
     recargo: number;
     serie: string | null;
     numero: string | null;
+    tipo: 'mensual' | 'navidad' | 'el_niño';
     created_at: string;
 }
 
@@ -29,7 +31,8 @@ export default function LoteriaAdmin() {
         precio: '',
         recargo: '',
         serie: '',
-        numero: ''
+        numero: '',
+        tipo: 'mensual' as 'mensual' | 'navidad' | 'el_niño'
     });
 
     const router = useRouter();
@@ -80,11 +83,12 @@ export default function LoteriaAdmin() {
                 precio: sorteo.precio.toString(),
                 recargo: sorteo.recargo.toString(),
                 serie: sorteo.serie || '',
-                numero: sorteo.numero || ''
+                numero: sorteo.numero || '',
+                tipo: sorteo.tipo
             });
         } else {
             setEditingSorteo(null);
-            setFormData({ descripcion: '', precio: '20', recargo: '3', serie: '', numero: '' });
+            setFormData({ descripcion: '', precio: '20', recargo: '3', serie: '', numero: '', tipo: 'mensual' });
         }
         setIsModalOpen(true);
     };
@@ -98,27 +102,98 @@ export default function LoteriaAdmin() {
             precio: parseFloat(formData.precio),
             recargo: parseFloat(formData.recargo),
             serie: formData.serie || null,
-            numero: formData.numero || null
+            numero: formData.numero || null,
+            tipo: formData.tipo
         };
 
-        let error;
         if (editingSorteo) {
-            ({ error } = await supabase
+            const { error } = await supabase
                 .from('sorteos')
                 .update(sorteoData)
-                .eq('id', editingSorteo.id));
-        } else {
-            ({ error } = await supabase
-                .from('sorteos')
-                .insert([sorteoData]));
-        }
+                .eq('id', editingSorteo.id);
 
-        if (!error) {
+            if (!error) {
+                setIsModalOpen(false);
+                fetchSorteos();
+            } else {
+                alert('Error al guardar el sorteo: ' + error.message);
+                setLoading(false);
+            }
+        } else {
+            // 1. Crear el sorteo y obtener el ID
+            const { data: sorteo, error: sorteoError } = await supabase
+                .from('sorteos')
+                .insert([sorteoData])
+                .select()
+                .single();
+
+            if (sorteoError) {
+                alert('Error al crear el sorteo: ' + sorteoError.message);
+                setLoading(false);
+                return;
+            }
+
+            // 2. Obtener socios activos
+            const { data: activeSocios } = await supabase
+                .from('socios')
+                .select('*')
+                .eq('is_active', true);
+
+            if (activeSocios && activeSocios.length > 0) {
+                const totalUnitario = sorteo.precio + sorteo.recargo;
+                const bulkPagos: any[] = [];
+                const bulkAsignaciones: any[] = [];
+
+                activeSocios.forEach(socio => {
+                    let cantidad = 0;
+
+                    if (sorteo.tipo === 'mensual') {
+                        // Solo si el socio tiene el flag activo
+                        if (socio.se_queda_loteria_mensual) {
+                            cantidad = 1 + (socio.loteria_mensual_extra || 0);
+                        }
+                    } else {
+                        // Navidad y El Niño: 1 base + cualquier extra para vender
+                        cantidad = 1 + (socio.loteria_especial_extra || 0);
+                    }
+
+                    if (cantidad > 0) {
+                        const montoTotal = cantidad * totalUnitario;
+                        const pagoId = crypto.randomUUID();
+
+                        bulkPagos.push({
+                            id: pagoId,
+                            socio_id: socio.id,
+                            tipo: 'cobro',
+                            monto: montoTotal,
+                            concepto: `Lotería: ${sorteo.descripcion} (${cantidad} décimos)`,
+                            categoria: 'Lotería',
+                            estado: 'pendiente'
+                        });
+
+                        bulkAsignaciones.push({
+                            socio_id: socio.id,
+                            sorteo_id: sorteo.id,
+                            cantidad: cantidad,
+                            total_monto: montoTotal,
+                            pago_id: pagoId
+                        });
+                    }
+                });
+
+                // 3. Inserción masiva
+                const { error: bulkPagosError } = await supabase.from('pagos_cobros').insert(bulkPagos);
+                if (bulkPagosError) {
+                    console.error('Error en bulk pagos:', bulkPagosError);
+                } else {
+                    const { error: bulkAsignError } = await supabase.from('loterias_asignadas').insert(bulkAsignaciones);
+                    if (bulkAsignError) console.error('Error en bulk asignaciones:', bulkAsignError);
+                }
+            }
+
             setIsModalOpen(false);
             fetchSorteos();
-        } else {
-            alert('Error al guardar el sorteo');
-            setLoading(false);
+            alert(`Sorteo creado y lotería asignada automáticamente a ${activeSocios?.length || 0} socios.`);
         }
     };
 
@@ -146,19 +221,6 @@ export default function LoteriaAdmin() {
         );
     }
 
-    const NavItem = ({ href, icon: Icon, label }: { href: string; icon: any; label: string }) => {
-        const isActive = pathname === href;
-        return (
-            <Link
-                href={href}
-                className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${isActive ? 'bg-fila-gold text-white shadow-lg shadow-fila-gold/20' : 'text-gray-500 hover:bg-fila-light hover:text-fila-dark'}`}
-            >
-                <Icon size={20} />
-                <span>{label}</span>
-            </Link>
-        );
-    };
-
     const filteredSorteos = sorteos.filter(s =>
         s.descripcion.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (s.numero && s.numero.includes(searchTerm)) ||
@@ -167,62 +229,7 @@ export default function LoteriaAdmin() {
 
     return (
         <main className="min-h-screen bg-[#F8F9FA] flex">
-            {/* Mobile Sidebar Overlay */}
-            {isMenuOpen && (
-                <div
-                    className="fixed inset-0 bg-fila-dark/40 backdrop-blur-sm z-[60] lg:hidden animate-in fade-in duration-300"
-                    onClick={() => setIsMenuOpen(false)}
-                />
-            )}
-
-            {/* Side Menu */}
-            <aside className={`
-                fixed inset-y-0 left-0 w-72 bg-white border-r border-gray-200 z-[70] flex flex-col p-6 transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0
-                ${isMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}
-            `}>
-                <div className="flex items-center justify-between mb-10 px-2">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-fila-dark rounded-xl flex items-center justify-center text-fila-gold shadow-lg shadow-fila-dark/20">
-                            <Shield size={24} />
-                        </div>
-                        <div>
-                            <p className="text-xs font-black text-fila-gold uppercase tracking-[0.2em]">Panel Admin</p>
-                            <h2 className="text-lg font-black text-fila-dark leading-none">CASTELL</h2>
-                        </div>
-                    </div>
-                    <button onClick={() => setIsMenuOpen(false)} className="lg:hidden p-2 text-gray-400 hover:bg-gray-100 rounded-xl transition-all">
-                        <X size={20} />
-                    </button>
-                </div>
-
-                <nav className="flex-1 space-y-2">
-                    <NavItem href="/admin" icon={Users} label="Gestión Socios" />
-                    <NavItem href="/admin/cobros" icon={Euro} label="Gestión Cobros" />
-                    <NavItem href="/admin/cuotas" icon={Euro} label="Configurar Cuotas" />
-                    <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
-                    <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
-                </nav>
-
-                <div className="pt-6 border-t border-gray-100 space-y-2">
-                    <Link
-                        href="/perfil"
-                        className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-gray-500 hover:bg-gray-50 transition-all"
-                    >
-                        <ArrowLeft size={20} />
-                        <span>Volver al Perfil</span>
-                    </Link>
-                    <button
-                        onClick={async () => {
-                            await supabase.auth.signOut();
-                            router.push('/');
-                        }}
-                        className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-red-500 hover:bg-red-50 transition-all w-full text-left"
-                    >
-                        <LogOut size={20} />
-                        <span>Cerrar Sesión</span>
-                    </button>
-                </div>
-            </aside>
+            <AdminSidebar isMenuOpen={isMenuOpen} setIsMenuOpen={setIsMenuOpen} />
 
             {/* Content Area */}
             <div className="flex-1">
@@ -271,8 +278,16 @@ export default function LoteriaAdmin() {
                                 </div>
 
                                 <div className="flex justify-between items-start mb-4 relative z-10">
-                                    <div className="p-3 bg-fila-light rounded-2xl text-fila-gold shadow-sm">
-                                        <Ticket size={24} />
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-3 bg-fila-light rounded-2xl text-fila-gold shadow-sm">
+                                            <Ticket size={24} />
+                                        </div>
+                                        <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase tracking-widest ${sorteo.tipo === 'navidad' ? 'bg-red-100 text-red-700' :
+                                            sorteo.tipo === 'el_niño' ? 'bg-blue-100 text-blue-700' :
+                                                'bg-green-100 text-green-700'
+                                            }`}>
+                                            {sorteo.tipo.replace('_', ' ')}
+                                        </span>
                                     </div>
                                     <div className="flex gap-1 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button
@@ -347,15 +362,29 @@ export default function LoteriaAdmin() {
                                 </button>
                             </div>
                             <form onSubmit={handleSubmit} className="p-8 md:p-10 space-y-6">
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Descripción del Sorteo</label>
-                                    <input
-                                        required
-                                        placeholder="Ej: Lotería de Navidad 2024"
-                                        value={formData.descripcion}
-                                        onChange={e => setFormData({ ...formData, descripcion: e.target.value })}
-                                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold"
-                                    />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-1.5 flex-[2]">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Descripción del Sorteo</label>
+                                        <input
+                                            required
+                                            placeholder="Ej: Lotería de Navidad 2024"
+                                            value={formData.descripcion}
+                                            onChange={e => setFormData({ ...formData, descripcion: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5 flex-1">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Tipo</label>
+                                        <select
+                                            value={formData.tipo}
+                                            onChange={e => setFormData({ ...formData, tipo: e.target.value as any })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold"
+                                        >
+                                            <option value="mensual">Mensual</option>
+                                            <option value="navidad">Navidad</option>
+                                            <option value="el_niño">El Niño</option>
+                                        </select>
+                                    </div>
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-6">

@@ -3,10 +3,12 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Shield } from '@/components/Shield';
-import { User, Mail, Phone, Calendar, LogOut, Loader2, Award, ShieldCheck, Euro } from 'lucide-react';
+import { User, Mail, Phone, Calendar, LogOut, Loader2, Award, ShieldCheck, Euro, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { Navbar } from '@/components/Navbar';
 import { useRouter } from 'next/navigation';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface SocioData {
     id: string;
@@ -32,6 +34,7 @@ interface Transaction {
     categoria: string;
     fecha: string;
     estado: 'pendiente' | 'completado' | 'cancelado';
+    metodo_pago?: string;
 }
 
 interface Evento {
@@ -110,7 +113,7 @@ export default function PerfilPage() {
                     .select('*')
                     .eq('socio_id', data.id)
                     .order('categoria', { ascending: true })
-                    .order('fecha', { ascending: false });
+                    .order('fecha', { ascending: true });
                 if (tData) setTransactions(tData);
 
                 // Fetch Events
@@ -180,6 +183,110 @@ export default function PerfilPage() {
             console.error('Error al registrarse:', error.message);
         }
         setLoading(false);
+    };
+
+    const generatePDF = () => {
+        if (!socio) return;
+
+        const doc = new jsPDF();
+        const fullName = `${socio.nombre} ${socio.primer_apellido} ${socio.segundo_apellido || ''}`.trim();
+        const date = new Date().toLocaleDateString('es-ES');
+
+        // Header
+        doc.setFontSize(22);
+        doc.setTextColor(184, 153, 76); // fila-gold
+        doc.text('FILÀ MOROS DEL CASTELL', 105, 20, { align: 'center' });
+
+        doc.setFontSize(14);
+        doc.setTextColor(33, 37, 41); // fila-dark
+        doc.text('EXTRACTO DE MOVIMIENTOS', 105, 30, { align: 'center' });
+
+        doc.setFontSize(10);
+        doc.setTextColor(100);
+        doc.text(`Socio: ${fullName}`, 20, 45);
+        doc.text(`Fecha: ${date}`, 20, 50);
+
+        let finalY = 60;
+
+        // Group transactions by category
+        const categories = Array.from(new Set(transactions.map(t => t.categoria || 'Varios')));
+
+        categories.forEach(cat => {
+            const catTransactions = transactions.filter(t => (t.categoria || 'Varios') === cat);
+            const catTotalCobro = catTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
+            const catTotalPago = catTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
+            const catPendiente = Math.max(0, catTotalCobro - catTotalPago);
+
+            doc.setFontSize(12);
+            doc.setTextColor(184, 153, 76);
+            doc.text(cat.toUpperCase(), 20, finalY);
+
+            // If there's a subtotal, show it next to the category name
+            if (catPendiente > 0) {
+                doc.setFontSize(9);
+                doc.setTextColor(255, 0, 0);
+                doc.text(`(Pendiente: ${catPendiente.toFixed(2)}€)`, 190, finalY, { align: 'right' });
+            }
+
+            const tableData = catTransactions.map(t => [
+                new Date(t.fecha).toLocaleDateString('es-ES'),
+                t.concepto,
+                t.metodo_pago || (t.tipo === 'cobro' ? '-' : '---'),
+                t.estado === 'completado' ? 'LIQUIDADO' : t.estado.toUpperCase(),
+                `${t.tipo === 'pago' ? '+' : '-'}${Number(t.monto).toFixed(2)}€`
+            ]);
+
+            autoTable(doc, {
+                startY: finalY + 5,
+                head: [['Fecha', 'Concepto', 'Método', 'Estado', 'Monto']],
+                body: tableData,
+                theme: 'grid',
+                headStyles: { fillColor: [26, 26, 26], textColor: [184, 153, 76], fontStyle: 'bold' },
+                styles: { fontSize: 9, cellPadding: 3 },
+                columnStyles: {
+                    4: { halign: 'right', fontStyle: 'bold' }
+                }
+            });
+
+            finalY = (doc as any).lastAutoTable.finalY + 15;
+
+            // Check if we need a new page
+            if (finalY > 250 && cat !== categories[categories.length - 1]) {
+                doc.addPage();
+                finalY = 20;
+            }
+        });
+
+        // Totals summary
+        const totalCobrado = transactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
+        const totalPagado = transactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
+        const totalPendiente = Math.max(0, totalCobrado - totalPagado);
+
+        doc.setFontSize(12);
+        doc.setTextColor(33, 37, 41);
+        doc.text('RESUMEN GENERAL DE CUENTA', 20, finalY + 5);
+
+        autoTable(doc, {
+            startY: finalY + 10,
+            body: [
+                ['Total ya abonado:', `${totalPagado.toFixed(2)}€`],
+                ['Saldo total pendiente:', `${totalPendiente.toFixed(2)}€`]
+            ],
+            theme: 'plain',
+            styles: { fontSize: 10, fontStyle: 'bold' },
+            columnStyles: {
+                0: { cellWidth: 100 },
+                1: { halign: 'right' }
+            },
+            didParseCell: (data) => {
+                if (data.column.index === 1) {
+                    if (data.row.index === 0) data.cell.styles.textColor = [34, 197, 94]; // Green for paid
+                    if (data.row.index === 1) data.cell.styles.textColor = [255, 0, 0]; // Red for debt
+                }
+            }
+        });
+
+        doc.save(`Extracto_Castell_${fullName.replace(/\s+/g, '_')}.pdf`);
     };
 
     const handleSignOut = async () => {
@@ -360,48 +467,96 @@ export default function PerfilPage() {
                             </div>
                             <h3 className="text-xl font-black text-fila-dark tracking-tighter uppercase">Historial de Cobros y Pagos</h3>
                         </div>
+                        <button
+                            onClick={generatePDF}
+                            disabled={transactions.length === 0}
+                            className="flex items-center gap-2 bg-fila-gold hover:bg-fila-gold/90 text-white px-5 py-2.5 rounded-2xl text-[10px] font-black tracking-widest uppercase transition-all shadow-lg shadow-fila-gold/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <FileText size={16} />
+                            <span>Descargar Extracto PDF</span>
+                        </button>
                     </div>
 
                     <div className="divide-y divide-gray-100">
                         {transactions.length > 0 ? (
-                            Array.from(new Set(transactions.map(t => t.categoria || 'Varios'))).map(cat => (
-                                <div key={cat} className="animate-in fade-in duration-500">
-                                    <div className="px-8 py-3 bg-fila-light/30 border-y border-gray-100/50">
-                                        <h4 className="text-[10px] font-black text-fila-gold uppercase tracking-[0.2em]">{cat}</h4>
-                                    </div>
-                                    <div className="divide-y divide-gray-100">
-                                        {transactions.filter(t => (t.categoria || 'Varios') === cat).map((t) => (
-                                            <div key={t.id} className="p-6 hover:bg-fila-light/20 transition-all flex items-center justify-between gap-4">
-                                                <div className="flex items-center gap-4">
-                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.tipo === 'pago' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
-                                                        <Euro size={16} />
+                            Array.from(new Set(transactions.map(t => t.categoria || 'Varios'))).map(cat => {
+                                const catTransactions = transactions.filter(t => (t.categoria || 'Varios') === cat);
+                                const catTotalCobro = catTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
+                                const catTotalPago = catTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
+                                const catPendiente = Math.max(0, catTotalCobro - catTotalPago);
+
+                                return (
+                                    <div key={cat} className="animate-in fade-in duration-500">
+                                        <div className="px-8 py-3 bg-fila-light/30 border-y border-gray-100/50 flex justify-between items-center">
+                                            <h4 className="text-[10px] font-black text-fila-gold uppercase tracking-[0.2em]">{cat}</h4>
+                                            {catPendiente > 0 && (
+                                                <span className="text-[9px] font-black text-red-500 uppercase tracking-widest bg-red-50 px-2 py-0.5 rounded-full border border-red-100">
+                                                    Pendiente: {catPendiente.toFixed(2)}€
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="divide-y divide-gray-100">
+                                            {catTransactions.map((t) => (
+                                                <div key={t.id} className="p-6 hover:bg-fila-light/20 transition-all flex items-center justify-between gap-4">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.tipo === 'pago' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
+                                                            <Euro size={16} />
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-bold text-fila-dark">{t.concepto}</p>
+                                                            <p className="text-xs text-gray-400 flex items-center gap-2">
+                                                                {new Date(t.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
+                                                                {t.tipo === 'pago' && t.metodo_pago && (
+                                                                    <>
+                                                                        <span className="w-1 h-1 rounded-full bg-gray-300"></span>
+                                                                        <span className="text-fila-gold font-black uppercase text-[9px] tracking-widest">{t.metodo_pago}</span>
+                                                                    </>
+                                                                )}
+                                                            </p>
+                                                        </div>
                                                     </div>
-                                                    <div>
-                                                        <p className="font-bold text-fila-dark">{t.concepto}</p>
-                                                        <p className="text-xs text-gray-400">
-                                                            {new Date(t.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
+                                                    <div className="text-right">
+                                                        <p className={`font-black text-lg ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
+                                                            {t.tipo === 'pago' ? '+' : '-'}{Number(t.monto).toFixed(2)}€
                                                         </p>
+                                                        <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${t.estado === 'completado' ? 'bg-green-50 text-green-600' :
+                                                            t.estado === 'pendiente' ? 'bg-orange-50 text-orange-600' :
+                                                                'bg-gray-50 text-gray-400'
+                                                            }`}>
+                                                            {t.estado}
+                                                        </span>
                                                     </div>
                                                 </div>
-                                                <div className="text-right">
-                                                    <p className={`font-black text-lg ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
-                                                        {t.tipo === 'pago' ? '+' : '-'}{Number(t.monto).toFixed(2)}€
-                                                    </p>
-                                                    <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${t.estado === 'completado' ? 'bg-green-50 text-green-600' :
-                                                        t.estado === 'pendiente' ? 'bg-orange-50 text-orange-600' :
-                                                            'bg-gray-50 text-gray-400'
-                                                        }`}>
-                                                        {t.estado}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        ))}
+                                            ))}
+                                        </div>
                                     </div>
-                                </div>
-                            ))
+                                );
+                            })
                         ) : (
                             <div className="p-12 text-center">
                                 <p className="text-gray-400 font-medium italic">No hay movimientos registrados.</p>
+                            </div>
+                        )}
+                        {transactions.length > 0 && (
+                            <div className="p-8 bg-fila-dark text-white flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div className="text-center md:text-left">
+                                    <p className="text-[10px] font-black text-fila-gold uppercase tracking-[0.2em] mb-1">Resumen General</p>
+                                    <h4 className="text-lg font-black tracking-tighter uppercase">Estado de cuenta del socio</h4>
+                                </div>
+                                <div className="flex gap-8">
+                                    <div className="text-right">
+                                        <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none mb-1">Total Pagado</p>
+                                        <p className="text-xl font-black text-green-400">
+                                            {transactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0).toFixed(2)}€
+                                        </p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none mb-1">Deuda Pendiente</p>
+                                        <p className="text-xl font-black text-red-400">
+                                            {Math.max(0, transactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0) - transactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0)).toFixed(2)}€
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </div>

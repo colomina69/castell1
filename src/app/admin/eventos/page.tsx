@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Eye, MoreVertical, LayoutDashboard, Ticket, Euro, Calendar, Search, Users, LogOut, MapPin, Music, Flag } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
+import { AdminSidebar } from '@/components/AdminSidebar';
 
 interface Evento {
     id: string;
@@ -197,19 +198,6 @@ export default function AdminEventos() {
         );
     }
 
-    const NavItem = ({ href, icon: Icon, label }: { href: string; icon: any; label: string }) => {
-        const isActive = pathname === href;
-        return (
-            <Link
-                href={href}
-                className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${isActive ? 'bg-fila-gold text-white shadow-lg shadow-fila-gold/20' : 'text-gray-500 hover:bg-fila-light hover:text-fila-dark'}`}
-            >
-                <Icon size={20} />
-                <span>{label}</span>
-            </Link>
-        );
-    };
-
     const filteredEventos = eventos.filter(e =>
         e.denominacion.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (e.descripcion && e.descripcion.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -218,50 +206,7 @@ export default function AdminEventos() {
 
     return (
         <main className="min-h-screen bg-[#F8F9FA] flex">
-            {/* Mobile Sidebar Overlay */}
-            {isMenuOpen && (
-                <div className="fixed inset-0 bg-fila-dark/40 backdrop-blur-sm z-[60] lg:hidden" onClick={() => setIsMenuOpen(false)} />
-            )}
-
-            {/* Side Menu */}
-            <aside className={`
-                fixed inset-y-0 left-0 w-72 bg-white border-r border-gray-200 z-[70] flex flex-col p-6 transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0
-                ${isMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}
-            `}>
-                <div className="flex items-center justify-between mb-10 px-2">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-fila-dark rounded-xl flex items-center justify-center text-fila-gold">
-                            <Shield size={24} />
-                        </div>
-                        <div>
-                            <p className="text-xs font-black text-fila-gold uppercase tracking-[0.2em]">Panel Admin</p>
-                            <h2 className="text-lg font-black text-fila-dark leading-none">CASTELL</h2>
-                        </div>
-                    </div>
-                </div>
-
-                <nav className="flex-1 space-y-2">
-                    <NavItem href="/admin" icon={Users} label="Gestión Socios" />
-                    <NavItem href="/admin/cobros" icon={Euro} label="Gestión Cobros" />
-                    <NavItem href="/admin/cuotas" icon={Euro} label="Configurar Cuotas" />
-                    <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
-                    <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
-                </nav>
-
-                <div className="pt-6 border-t border-gray-100 space-y-2">
-                    <Link href="/perfil" className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-gray-500 hover:bg-gray-50 transition-all">
-                        <ArrowLeft size={20} />
-                        <span>Volver al Perfil</span>
-                    </Link>
-                    <button
-                        onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}
-                        className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-red-500 hover:bg-red-50 transition-all w-full text-left"
-                    >
-                        <LogOut size={20} />
-                        <span>Cerrar Sesión</span>
-                    </button>
-                </div>
-            </aside>
+            <AdminSidebar isMenuOpen={isMenuOpen} setIsMenuOpen={setIsMenuOpen} />
 
             {/* Content Area */}
             <div className="flex-1">
