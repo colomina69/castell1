@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Shield, Search, UserPlus, Edit2, Trash2, UserCheck, Loader2, ArrowLeft, MoreVertical, X, Check, Mail, Phone, Euro, Ticket, Save, LayoutDashboard, Settings, LogOut } from 'lucide-react';
+import { Shield, Search, UserPlus, Edit2, Trash2, UserCheck, Loader2, ArrowLeft, MoreVertical, X, Check, Mail, Phone, Euro, Ticket, Save, LayoutDashboard, Settings, LogOut, Calendar, Users, Info } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 
@@ -35,6 +35,21 @@ interface Profile {
     socio_id: string | null;
 }
 
+interface Transaction {
+    id: string;
+    socio_id: string;
+    tipo: 'cobro' | 'pago';
+    monto: number;
+    concepto: string;
+    categoria: string;
+    fecha: string;
+    estado: 'pendiente' | 'completado' | 'cancelado';
+    socios: {
+        nombre: string;
+        primer_apellido: string;
+    };
+}
+
 export default function AdminDashboard() {
     const [socios, setSocios] = useState<Socio[]>([]);
     const [quotas, setQuotas] = useState<Quota[]>([]);
@@ -42,7 +57,9 @@ export default function AdminDashboard() {
     const [profiles, setProfiles] = useState<Profile[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [activeTab, setActiveTab] = useState<'socios' | 'movimientos'>('socios');
     const [isAdmin, setIsAdmin] = useState(false);
+    const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
     const [chargingId, setChargingId] = useState<string | null>(null);
     const router = useRouter();
     const pathname = usePathname();
@@ -66,6 +83,12 @@ export default function AdminDashboard() {
         sorteo_id: '',
         cantidad: '1'
     });
+
+    const [isEventModalOpen, setIsEventModalOpen] = useState(false);
+    const [selectedEvento, setSelectedEvento] = useState<any>(null);
+    const [eventInscripciones, setEventInscripciones] = useState<any[]>([]);
+    const [eventosList, setEventosList] = useState<any[]>([]);
+    const [chargingEvent, setChargingEvent] = useState(false);
 
     const [createForm, setCreateForm] = useState({
         nombre: '',
@@ -101,6 +124,8 @@ export default function AdminDashboard() {
             fetchQuotas();
             fetchProfiles();
             fetchSorteos();
+            fetchEventos();
+            fetchRecentTransactions();
         };
 
         checkAdmin();
@@ -122,6 +147,58 @@ export default function AdminDashboard() {
             setSorteos(data);
             if (data.length > 0) setLoteriaForm(prev => ({ ...prev, sorteo_id: data[0].id }));
         }
+    };
+
+    const fetchEventos = async () => {
+        const { data } = await supabase.from('eventos').select('*').order('fecha', { ascending: false });
+        if (data) setEventosList(data);
+    };
+
+    const fetchRecentTransactions = async () => {
+        const { data } = await supabase
+            .from('pagos_cobros')
+            .select('*, socios(nombre, primer_apellido)')
+            .order('fecha', { ascending: false })
+            .limit(15);
+        if (data) setRecentTransactions(data as any);
+    };
+
+    const handleSelectEvento = async (eventoId: string) => {
+        const evento = eventosList.find(e => e.id === eventoId);
+        setSelectedEvento(evento);
+        if (evento) {
+            const { data } = await supabase
+                .from('inscripciones_eventos')
+                .select('*, socios(nombre, primer_apellido)')
+                .eq('evento_id', evento.id);
+            if (data) setEventInscripciones(data);
+        }
+    };
+
+    const handleChargeEvent = async (inscripcion: any) => {
+        if (!selectedEvento || !inscripcion) return;
+
+        setChargingId(inscripcion.socio_id);
+        const total = selectedEvento.precio_socio + (inscripcion.numero_invitados * selectedEvento.precio_invitado);
+
+        const { error } = await supabase
+            .from('pagos_cobros')
+            .insert([{
+                socio_id: inscripcion.socio_id,
+                tipo: 'cobro',
+                monto: total,
+                concepto: `Evento: ${selectedEvento.denominacion} (${inscripcion.numero_invitados} invitados)`,
+                categoria: 'Evento',
+                estado: 'pendiente'
+            }]);
+
+        if (!error) {
+            alert('Cargo de evento generado correctamente');
+            fetchRecentTransactions();
+        } else {
+            alert('Error al generar el cargo: ' + error.message);
+        }
+        setChargingId(null);
     };
 
     const fetchSocios = async () => {
@@ -247,6 +324,7 @@ export default function AdminDashboard() {
                 tipo: transactionForm.tipo,
                 monto: montoNum,
                 concepto: transactionForm.concepto,
+                categoria: transactionForm.tipo === 'cobro' ? 'Cuota' : 'Varios',
                 metodo_pago: transactionForm.tipo === 'pago' ? transactionForm.metodo_pago : null,
                 estado: transactionForm.estado
             }]);
@@ -254,6 +332,7 @@ export default function AdminDashboard() {
         if (!error) {
             alert('Movimiento registrado correctamente');
             setTransactionSocio(null);
+            fetchRecentTransactions();
         } else {
             alert('Error al registrar el movimiento: ' + error.message);
         }
@@ -280,6 +359,7 @@ export default function AdminDashboard() {
                 tipo: 'cobro',
                 monto: total,
                 concepto: `Lotería: ${sorteo.descripcion} (${cantidad} décimos)`,
+                categoria: 'Lotería',
                 estado: 'pendiente'
             }])
             .select()
@@ -305,6 +385,7 @@ export default function AdminDashboard() {
         if (!asignError) {
             alert('Lotería asignada y cargo generado correctamente');
             setLoteriaSocio(null);
+            fetchRecentTransactions();
         } else {
             alert('Error al registrar la asignación: ' + asignError.message);
         }
@@ -325,6 +406,7 @@ export default function AdminDashboard() {
                 tipo: 'cobro',
                 monto: quota?.monto || 0,
                 concepto: `Cuota Anual ${year}: ${quota?.nombre || 'General'}`,
+                categoria: 'Cuota',
                 estado: 'pendiente'
             };
         });
@@ -339,6 +421,7 @@ export default function AdminDashboard() {
 
         if (!error) {
             alert(`¡Éxito! Se han generado ${charges.length} cargos de cuota anual.`);
+            fetchRecentTransactions();
         } else {
             alert('Hubo un error al generar los cargos masivos.');
         }
@@ -402,8 +485,11 @@ export default function AdminDashboard() {
                 </div>
 
                 <nav className="flex-1 space-y-2">
+                    <NavItem href="/admin" icon={Users} label="Gestión Socios" />
+                    <NavItem href="/admin/cobros" icon={Euro} label="Gestión Cobros" />
+                    <NavItem href="/admin/cuotas" icon={Euro} label="Configurar Cuotas" />
                     <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
-                    <NavItem href="/admin/eventos" icon={LayoutDashboard} label="Gestión Eventos" />
+                    <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
                 </nav>
 
                 <div className="pt-6 border-t border-gray-100 space-y-2">
@@ -476,7 +562,7 @@ export default function AdminDashboard() {
 
                 <div className="p-4 md:p-8">
                     {/* Stats Grid */}
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-8">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-10">
                         {[
                             { label: 'Total', val: socios.length, icon: UserCheck, color: 'text-blue-600', bg: 'bg-blue-50' },
                             { label: 'Activos', val: socios.filter(s => s.is_active).length, icon: Check, color: 'text-green-600', bg: 'bg-green-50' },
@@ -495,165 +581,268 @@ export default function AdminDashboard() {
                         ))}
                     </div>
 
-                    {/* Members List - Card View (Mobile) */}
-                    <div className="grid grid-cols-1 gap-4 md:hidden pb-10">
-                        {filteredSocios.map((s) => (
-                            <div key={s.id} className="bg-white p-5 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-md transition-all relative overflow-hidden group">
-                                <div className="flex justify-between items-start mb-4">
-                                    <div className="flex items-center gap-3">
-                                        <div className="w-12 h-12 rounded-2xl bg-fila-light flex items-center justify-center text-fila-gold font-bold text-lg shadow-inner shrink-0">
-                                            {s.nombre[0]}{s.primer_apellido[0]}
-                                        </div>
-                                        <div className="min-w-0">
-                                            <h3 className="font-black text-fila-dark leading-none truncate mb-1 uppercase tracking-tight">{s.nombre} {s.primer_apellido}</h3>
-                                            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider truncate">{s.segundo_apellido || '-'}</p>
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={() => toggleStatus(s)}
-                                        className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${s.is_active ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}
-                                    >
-                                        {s.is_active ? 'ALTA' : 'BAJA'}
-                                    </button>
-                                </div>
-
-                                <div className="grid grid-cols-1 gap-2 border-t border-b border-gray-50 py-4 my-4">
-                                    <div className="flex items-center gap-3 text-gray-400">
-                                        <Mail size={14} className="shrink-0 text-fila-gold" />
-                                        <span className="text-xs font-medium truncate">{s.email || 'Sin email'}</span>
-                                    </div>
-                                    <div className="flex items-center gap-3 text-gray-400">
-                                        <Phone size={14} className="shrink-0 text-fila-gold" />
-                                        <span className="text-xs font-medium">{s.telefono || 'Sin teléfono'}</span>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                        <Euro size={14} className="shrink-0 text-fila-gold" />
-                                        <div className="flex flex-col">
-                                            <span className="text-xs font-black text-fila-dark uppercase tracking-tight">
-                                                {quotas.find(q => q.id === s.cuota_id)?.nombre || 'Sin cuota'}
-                                            </span>
-                                            {s.cuota_id && <span className="text-[9px] text-fila-gold font-bold">{quotas.find(q => q.id === s.cuota_id)?.monto}€ / anual</span>}
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div className="flex gap-2">
-                                    <button
-                                        onClick={() => setLoteriaSocio(s)}
-                                        className="flex-1 bg-fila-gold/10 text-fila-gold py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-fila-gold hover:text-white transition-all"
-                                    >
-                                        <Ticket size={14} />
-                                        Lotería
-                                    </button>
-                                    <button
-                                        onClick={() => handleOpenTransaction(s)}
-                                        className="flex-1 bg-fila-dark/5 text-fila-dark py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-fila-dark hover:text-white transition-all"
-                                    >
-                                        <Euro size={14} />
-                                        Movimiento
-                                    </button>
-                                    <button
-                                        onClick={() => setEditingSocio(s)}
-                                        className="p-3 bg-gray-50 text-gray-400 rounded-2xl hover:bg-gray-100 hover:text-fila-dark transition-all"
-                                    >
-                                        <Edit2 size={16} />
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
+                    {/* Tab Navigation */}
+                    <div className="flex bg-white/50 backdrop-blur-sm p-1.5 rounded-[24px] border border-gray-200 w-fit mb-8 shadow-sm">
+                        <button
+                            onClick={() => setActiveTab('socios')}
+                            className={`flex items-center gap-2.5 px-6 py-3 rounded-[18px] text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'socios'
+                                ? 'bg-fila-dark text-white shadow-lg shadow-fila-dark/20'
+                                : 'text-gray-400 hover:text-gray-600 hover:bg-white'
+                                }`}
+                        >
+                            <Users size={16} />
+                            <span>Gestión de Socios</span>
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('movimientos')}
+                            className={`flex items-center gap-2.5 px-6 py-3 rounded-[18px] text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'movimientos'
+                                ? 'bg-fila-dark text-white shadow-lg shadow-fila-dark/20'
+                                : 'text-gray-400 hover:text-gray-600 hover:bg-white'
+                                }`}
+                        >
+                            <Euro size={16} />
+                            <span>Historial Movimientos</span>
+                        </button>
                     </div>
 
-                    {/* Members Table - Desktop View */}
-                    <div className="hidden md:block bg-white rounded-[40px] border border-gray-200 shadow-sm overflow-hidden">
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse text-sm">
-                                <thead>
-                                    <tr className="bg-gray-50/50 border-b border-gray-200">
-                                        <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Socio</th>
-                                        <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Web</th>
-                                        <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Contacto</th>
-                                        <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Tipo Cuota</th>
-                                        <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Estado</th>
-                                        <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] text-right">Acciones rápidas</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-100">
-                                    {filteredSocios.map((s) => (
-                                        <tr key={s.id} className="hover:bg-gray-50/50 transition-all group">
-                                            <td className="px-6 py-5">
-                                                <div className="flex items-center gap-4">
-                                                    <div className="w-10 h-10 rounded-2xl bg-fila-light flex items-center justify-center text-fila-gold font-bold text-sm shrink-0 shadow-sm">
-                                                        {s.nombre[0]}{s.primer_apellido[0]}
-                                                    </div>
-                                                    <div>
-                                                        <p className="font-bold text-fila-dark leading-tight">{s.nombre} {s.primer_apellido} {s.segundo_apellido}</p>
-                                                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">ID: {s.id.split('-')[0]}</p>
-                                                    </div>
+                    {activeTab === 'socios' ? (
+                        <>
+
+
+                            {/* Members List - Card View (Mobile) */}
+                            <div className="grid grid-cols-1 gap-4 md:hidden pb-10">
+                                {filteredSocios.map((s) => (
+                                    <div key={s.id} className="bg-white p-5 rounded-[32px] border border-gray-100 shadow-sm hover:shadow-md transition-all relative overflow-hidden group">
+                                        <div className="flex justify-between items-start mb-4">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-12 h-12 rounded-2xl bg-fila-light flex items-center justify-center text-fila-gold font-bold text-lg shadow-inner shrink-0">
+                                                    {s.nombre[0]}{s.primer_apellido[0]}
                                                 </div>
-                                            </td>
-                                            <td className="px-6 py-5">
-                                                {profiles.some(p => p.socio_id === s.id) ? (
-                                                    <div className="flex items-center gap-1.5 text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-xl w-fit border border-blue-100/50">
-                                                        <Shield size={10} className="fill-blue-600" />
-                                                        <span className="text-[9px] font-black uppercase tracking-tighter">Acceso Web</span>
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-[9px] font-bold text-gray-300 uppercase tracking-widest ml-1">-</span>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-5">
-                                                <div className="space-y-1">
-                                                    <p className="text-gray-500 font-medium truncate max-w-[150px]">{s.email || '--'}</p>
-                                                    <p className="text-[10px] text-gray-400 font-bold tracking-widest">{s.telefono || '--'}</p>
+                                                <div className="min-w-0">
+                                                    <h3 className="font-black text-fila-dark leading-none truncate mb-1 uppercase tracking-tight">{s.nombre} {s.primer_apellido}</h3>
+                                                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider truncate">{s.segundo_apellido || '-'}</p>
                                                 </div>
-                                            </td>
-                                            <td className="px-6 py-5">
+                                            </div>
+                                            <button
+                                                onClick={() => toggleStatus(s)}
+                                                className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${s.is_active ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}
+                                            >
+                                                {s.is_active ? 'ALTA' : 'BAJA'}
+                                            </button>
+                                        </div>
+
+                                        <div className="grid grid-cols-1 gap-2 border-t border-b border-gray-50 py-4 my-4">
+                                            <div className="flex items-center gap-3 text-gray-400">
+                                                <Mail size={14} className="shrink-0 text-fila-gold" />
+                                                <span className="text-xs font-medium truncate">{s.email || 'Sin email'}</span>
+                                            </div>
+                                            <div className="flex items-center gap-3 text-gray-400">
+                                                <Phone size={14} className="shrink-0 text-fila-gold" />
+                                                <span className="text-xs font-medium">{s.telefono || 'Sin teléfono'}</span>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <Euro size={14} className="shrink-0 text-fila-gold" />
                                                 <div className="flex flex-col">
                                                     <span className="text-xs font-black text-fila-dark uppercase tracking-tight">
-                                                        {quotas.find(q => q.id === s.cuota_id)?.nombre || '---'}
+                                                        {quotas.find(q => q.id === s.cuota_id)?.nombre || 'Sin cuota'}
                                                     </span>
-                                                    {s.cuota_id && <span className="text-[10px] text-fila-gold font-bold">{quotas.find(q => q.id === s.cuota_id)?.monto}€ / anual</span>}
+                                                    {s.cuota_id && <span className="text-[9px] text-fila-gold font-bold">{quotas.find(q => q.id === s.cuota_id)?.monto}€ / anual</span>}
                                                 </div>
-                                            </td>
-                                            <td className="px-6 py-5">
-                                                <button
-                                                    onClick={() => toggleStatus(s)}
-                                                    className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${s.is_active ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}
-                                                >
-                                                    {s.is_active ? 'ALTA' : 'BAJA'}
-                                                </button>
-                                            </td>
-                                            <td className="px-6 py-5 text-right">
-                                                <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                    <button
-                                                        onClick={() => setLoteriaSocio(s)}
-                                                        title="Asignar Lotería"
-                                                        className="p-2.5 text-fila-gold hover:bg-fila-gold/10 rounded-xl transition-all"
-                                                    >
-                                                        <Ticket size={18} />
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleOpenTransaction(s)}
-                                                        disabled={chargingId === s.id}
-                                                        title="Tesorería Manual"
-                                                        className="p-2.5 text-fila-dark hover:bg-gray-100 rounded-xl transition-all"
-                                                    >
-                                                        {chargingId === s.id ? <Loader2 size={18} className="animate-spin" /> : <Euro size={18} />}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setEditingSocio(s)}
-                                                        className="p-2.5 text-gray-400 hover:text-black hover:bg-gray-100 rounded-xl transition-all"
-                                                    >
-                                                        <Edit2 size={18} />
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => setLoteriaSocio(s)}
+                                                className="flex-1 bg-fila-gold/10 text-fila-gold py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-fila-gold hover:text-white transition-all"
+                                            >
+                                                <Ticket size={14} />
+                                                Lotería
+                                            </button>
+                                            <button
+                                                onClick={() => handleOpenTransaction(s)}
+                                                className="flex-1 bg-fila-dark/5 text-fila-dark py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-fila-dark hover:text-white transition-all"
+                                            >
+                                                <Euro size={14} />
+                                                Movimiento
+                                            </button>
+                                            <button
+                                                onClick={() => setEditingSocio(s)}
+                                                className="p-3 bg-gray-50 text-gray-400 rounded-2xl hover:bg-gray-100 hover:text-fila-dark transition-all"
+                                            >
+                                                <Edit2 size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Members Table - Desktop View */}
+                            <div className="hidden md:block bg-white rounded-[40px] border border-gray-200 shadow-sm overflow-hidden">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse text-sm">
+                                        <thead>
+                                            <tr className="bg-gray-50/50 border-b border-gray-200">
+                                                <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Socio</th>
+                                                <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Web</th>
+                                                <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Contacto</th>
+                                                <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Tipo Cuota</th>
+                                                <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">Estado</th>
+                                                <th className="px-6 py-5 text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] text-right">Acciones rápidas</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {filteredSocios.map((s) => (
+                                                <tr key={s.id} className="hover:bg-gray-50/50 transition-all group">
+                                                    <td className="px-6 py-5">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="w-10 h-10 rounded-2xl bg-fila-light flex items-center justify-center text-fila-gold font-bold text-sm shrink-0 shadow-sm">
+                                                                {s.nombre[0]}{s.primer_apellido[0]}
+                                                            </div>
+                                                            <div>
+                                                                <p className="font-bold text-fila-dark leading-tight">{s.nombre} {s.primer_apellido} {s.segundo_apellido}</p>
+                                                                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mt-0.5">ID: {s.id.split('-')[0]}</p>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-5">
+                                                        {profiles.some(p => p.socio_id === s.id) ? (
+                                                            <div className="flex items-center gap-1.5 text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-xl w-fit border border-blue-100/50">
+                                                                <Shield size={10} className="fill-blue-600" />
+                                                                <span className="text-[9px] font-black uppercase tracking-tighter">Acceso Web</span>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-[9px] font-bold text-gray-300 uppercase tracking-widest ml-1">-</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-6 py-5">
+                                                        <div className="space-y-1">
+                                                            <p className="text-gray-500 font-medium truncate max-w-[150px]">{s.email || '--'}</p>
+                                                            <p className="text-[10px] text-gray-400 font-bold tracking-widest">{s.telefono || '--'}</p>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-5">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-xs font-black text-fila-dark uppercase tracking-tight">
+                                                                {quotas.find(q => q.id === s.cuota_id)?.nombre || '---'}
+                                                            </span>
+                                                            {s.cuota_id && <span className="text-[10px] text-fila-gold font-bold">{quotas.find(q => q.id === s.cuota_id)?.monto}€ / anual</span>}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-5">
+                                                        <button
+                                                            onClick={() => toggleStatus(s)}
+                                                            className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${s.is_active ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-red-50 text-red-700 border border-red-100'}`}
+                                                        >
+                                                            {s.is_active ? 'ALTA' : 'BAJA'}
+                                                        </button>
+                                                    </td>
+                                                    <td className="px-6 py-5 text-right">
+                                                        <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                            <button
+                                                                onClick={() => setLoteriaSocio(s)}
+                                                                title="Asignar Lotería"
+                                                                className="p-2.5 text-fila-gold hover:bg-fila-gold/10 rounded-xl transition-all"
+                                                            >
+                                                                <Ticket size={18} />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => handleOpenTransaction(s)}
+                                                                disabled={chargingId === s.id}
+                                                                title="Tesorería Manual"
+                                                                className="p-2.5 text-fila-dark hover:bg-gray-100 rounded-xl transition-all"
+                                                            >
+                                                                {chargingId === s.id ? <Loader2 size={18} className="animate-spin" /> : <Euro size={18} />}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => setEditingSocio(s)}
+                                                                className="p-2.5 text-gray-400 hover:text-black hover:bg-gray-100 rounded-xl transition-all"
+                                                            >
+                                                                <Edit2 size={18} />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        /* Historial Movimientos Tab Content */
+                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            <div className="bg-white rounded-[32px] md:rounded-[40px] border border-gray-200 shadow-sm overflow-hidden mb-10">
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-left border-collapse text-xs md:text-sm">
+                                        <thead>
+                                            <tr className="bg-gray-50/50 border-b border-gray-200">
+                                                <th className="px-6 py-5 text-[9px] font-black text-gray-400 uppercase tracking-widest">Socio</th>
+                                                <th className="px-6 py-5 text-[9px] font-black text-gray-400 uppercase tracking-widest">Concepto</th>
+                                                <th className="px-6 py-5 text-[9px] font-black text-gray-400 uppercase tracking-widest">Monto</th>
+                                                <th className="px-6 py-5 text-[9px] font-black text-gray-400 uppercase tracking-widest">Fecha</th>
+                                                <th className="px-6 py-5 text-[9px] font-black text-gray-400 uppercase tracking-widest">Estado</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-100">
+                                            {recentTransactions.map((t) => (
+                                                <tr key={t.id} className="hover:bg-gray-50/30 transition-all">
+                                                    <td className="px-6 py-5">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-8 h-8 rounded-xl bg-fila-light flex items-center justify-center text-fila-gold font-bold text-[10px]">
+                                                                {t.socios?.nombre[0]}{t.socios?.primer_apellido[0]}
+                                                            </div>
+                                                            <p className="font-bold text-fila-dark uppercase tracking-tight truncate max-w-[150px]">
+                                                                {t.socios?.nombre} {t.socios?.primer_apellido}
+                                                            </p>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-5">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`w-1.5 h-1.5 rounded-full ${t.categoria === 'Cuota' ? 'bg-blue-400' :
+                                                                t.categoria === 'Lotería' ? 'bg-orange-400' :
+                                                                    t.categoria === 'Evento' ? 'bg-purple-400' : 'bg-gray-400'
+                                                                }`} />
+                                                            <p className="text-gray-500 font-medium truncate max-w-[250px]">{t.concepto}</p>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-6 py-5">
+                                                        <p className={`font-black text-base ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
+                                                            {t.tipo === 'pago' ? '+' : '-'}{Number(t.monto).toFixed(2)}€
+                                                        </p>
+                                                    </td>
+                                                    <td className="px-6 py-5">
+                                                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+                                                            {new Date(t.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })}
+                                                            <span className="block opacity-50">{new Date(t.fecha).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                        </p>
+                                                    </td>
+                                                    <td className="px-6 py-5">
+                                                        <span className={`text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-lg ${t.estado === 'completado' ? 'bg-green-50 text-green-600 border border-green-100' :
+                                                            t.estado === 'pendiente' ? 'bg-orange-50 text-orange-600 border border-orange-100' :
+                                                                'bg-gray-50 text-gray-400'
+                                                            }`}>
+                                                            {t.estado}
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                            {recentTransactions.length === 0 && !loading && (
+                                                <tr>
+                                                    <td colSpan={5} className="px-6 py-20 text-center">
+                                                        <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-300">
+                                                            <Euro size={32} />
+                                                        </div>
+                                                        <p className="text-gray-400 font-medium italic">No hay movimientos recientes registrados.</p>
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 {/* Create Socio Modal */}
@@ -751,82 +940,77 @@ export default function AdminDashboard() {
                     </div>
                 )}
 
-                {/* Lottery Modal */}
-                {loteriaSocio && (
+                {/* Event Charging Modal */}
+                {isEventModalOpen && (
                     <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
-                        <div className="bg-white w-full max-w-md rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
-                            <div className="px-8 py-7 border-b border-gray-100 flex justify-between items-center bg-fila-gold text-white">
+                        <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 max-h-[90vh] flex flex-col">
+                            <div className="px-8 py-7 border-b border-gray-100 flex justify-between items-center bg-fila-dark text-white shrink-0">
                                 <div>
-                                    <h2 className="text-xl font-black tracking-tighter uppercase">Asignar Lotería</h2>
-                                    <p className="text-[10px] text-white/70 font-black uppercase tracking-widest">{loteriaSocio.nombre} {loteriaSocio.primer_apellido}</p>
+                                    <h2 className="text-xl font-black tracking-tighter uppercase">Cobros de Eventos</h2>
+                                    <p className="text-[10px] text-white/70 font-black uppercase tracking-widest">Generar cargos por asistencia</p>
                                 </div>
-                                <button onClick={() => setLoteriaSocio(null)} className="p-2 hover:bg-white/10 rounded-full transition-all">
+                                <button onClick={() => { setIsEventModalOpen(false); setSelectedEvento(null); setEventInscripciones([]); }} className="p-2 hover:bg-white/10 rounded-full transition-all">
                                     <X size={20} />
                                 </button>
                             </div>
-                            <form onSubmit={handleAssignLoteria} className="p-8 space-y-6">
+
+                            <div className="p-8 space-y-6 overflow-y-auto">
                                 <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Seleccionar Sorteo</label>
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Seleccionar Evento</label>
                                     <select
-                                        required
-                                        value={loteriaForm.sorteo_id}
-                                        onChange={e => setLoteriaForm({ ...loteriaForm, sorteo_id: e.target.value })}
+                                        onChange={(e) => handleSelectEvento(e.target.value)}
+                                        value={selectedEvento?.id || ''}
                                         className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold text-fila-dark"
                                     >
-                                        {sorteos.length === 0 && <option value="">No hay sorteos disponibles</option>}
-                                        {sorteos.map(sorteo => (
-                                            <option key={sorteo.id} value={sorteo.id}>
-                                                {sorteo.descripcion} ({sorteo.precio + sorteo.recargo}€)
+                                        <option value="">Selecciona un evento...</option>
+                                        {eventosList.map(evento => (
+                                            <option key={evento.id} value={evento.id}>
+                                                {new Date(evento.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'short' })} - {evento.denominacion}
                                             </option>
                                         ))}
                                     </select>
                                 </div>
 
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Cantidad de Décimos</label>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        required
-                                        value={loteriaForm.cantidad}
-                                        onChange={e => setLoteriaForm({ ...loteriaForm, cantidad: e.target.value })}
-                                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none font-black text-2xl text-fila-dark text-center"
-                                    />
-                                </div>
-
-                                {loteriaForm.sorteo_id && (
-                                    <div className="bg-fila-light p-5 rounded-3xl border border-fila-gold/20 shadow-inner">
-                                        <div className="flex justify-between items-center mb-1.5 text-[10px] font-black text-gray-400 uppercase tracking-wider">
-                                            <span>Cargo por décimo:</span>
-                                            <span>{(sorteos.find(s => s.id === loteriaForm.sorteo_id)?.precio || 0) + (sorteos.find(s => s.id === loteriaForm.sorteo_id)?.recargo || 0)}€</span>
+                                {selectedEvento && (
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center px-2">
+                                            <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Inscritos ({eventInscripciones.length})</h3>
+                                            <div className="text-[10px] font-black text-fila-gold uppercase">
+                                                Precios: socio {selectedEvento.precio_socio}€ | invitado {selectedEvento.precio_invitado}€
+                                            </div>
                                         </div>
-                                        <div className="flex justify-between items-center">
-                                            <span className="text-fila-dark font-black tracking-tighter uppercase text-sm">TOTAL A COBRAR:</span>
-                                            <span className="text-2xl font-black text-fila-gold">
-                                                {(parseInt(loteriaForm.cantidad || '0') * ((sorteos.find(s => s.id === loteriaForm.sorteo_id)?.precio || 0) + (sorteos.find(s => s.id === loteriaForm.sorteo_id)?.recargo || 0))).toFixed(2)}€
-                                            </span>
+
+                                        <div className="space-y-2">
+                                            {eventInscripciones.length > 0 ? (
+                                                eventInscripciones.map((ins) => (
+                                                    <div key={ins.id} className="bg-gray-50 p-4 rounded-2xl flex items-center justify-between border border-gray-100">
+                                                        <div>
+                                                            <p className="font-bold text-fila-dark text-sm uppercase">{ins.socios?.nombre} {ins.socios?.primer_apellido}</p>
+                                                            <p className="text-[10px] text-gray-400 font-bold uppercase tracking-tight">
+                                                                {ins.grupo} • {ins.numero_invitados} invitados
+                                                            </p>
+                                                        </div>
+                                                        <div className="flex items-center gap-4">
+                                                            <span className="font-black text-fila-dark">
+                                                                {(selectedEvento.precio_socio + (ins.numero_invitados * selectedEvento.precio_invitado)).toFixed(2)}€
+                                                            </span>
+                                                            <button
+                                                                onClick={() => handleChargeEvent(ins)}
+                                                                disabled={chargingId === ins.socio_id}
+                                                                className="p-2.5 bg-white border border-gray-200 text-fila-gold rounded-xl hover:bg-fila-gold hover:text-white transition-all shadow-sm"
+                                                            >
+                                                                {chargingId === ins.socio_id ? <Loader2 size={16} className="animate-spin" /> : <Euro size={16} />}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                ))
+                                            ) : (
+                                                <p className="text-center py-8 text-gray-400 italic text-sm">No hay inscripciones para este evento.</p>
+                                            )}
                                         </div>
                                     </div>
                                 )}
-
-                                <div className="pt-4 flex gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={() => setLoteriaSocio(null)}
-                                        className="flex-1 px-4 py-4 rounded-2xl border border-gray-200 font-bold text-gray-500 hover:bg-gray-50 transition-all text-[10px] tracking-widest uppercase"
-                                    >
-                                        Cancelar
-                                    </button>
-                                    <button
-                                        type="submit"
-                                        disabled={chargingId === loteriaSocio.id || !loteriaForm.sorteo_id}
-                                        className="flex-[2] px-4 py-4 rounded-2xl bg-fila-dark text-white font-black hover:bg-black transition-all shadow-xl shadow-fila-dark/20 flex items-center justify-center gap-2 text-[10px] tracking-widest uppercase"
-                                    >
-                                        {chargingId === loteriaSocio.id ? <Loader2 size={16} className="animate-spin" /> : <Ticket size={16} />}
-                                        Confirmar Asignación
-                                    </button>
-                                </div>
-                            </form>
+                            </div>
                         </div>
                     </div>
                 )}

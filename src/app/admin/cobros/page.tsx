@@ -1,0 +1,782 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import {
+    Euro,
+    Shield,
+    LayoutDashboard,
+    Ticket,
+    Calendar,
+    Users,
+    ArrowLeft,
+    LogOut,
+    MoreVertical,
+    X,
+    Loader2,
+    CheckCircle2,
+    Search,
+    Plus,
+    Info,
+    History
+} from 'lucide-react';
+import Link from 'next/link';
+import { useRouter, usePathname } from 'next/navigation';
+
+interface Evento {
+    id: string;
+    denominacion: string;
+    fecha: string;
+    precio_socio: number;
+    precio_invitado: number;
+}
+
+interface Inscripcion {
+    id: string;
+    evento_id: string;
+    socio_id: string;
+    numero_invitados: number;
+    socios: {
+        nombre: string;
+        primer_apellido: string;
+    };
+}
+
+interface TransactionState {
+    id: string;
+    monto: number;
+    pagado: number;
+    estado: 'pendiente' | 'completado' | 'cancelado';
+    is_automatic: boolean;
+    concepto: string;
+}
+
+export default function CobrosAdmin() {
+    const [activeTab, setActiveTab] = useState<'eventos' | 'cuotas' | 'loteria'>('eventos');
+    const [eventos, setEventos] = useState<Evento[]>([]);
+    const [selectedEvento, setSelectedEvento] = useState<Evento | null>(null);
+    const [sorteos, setSorteos] = useState<any[]>([]);
+    const [selectedSorteo, setSelectedSorteo] = useState<any | null>(null);
+    const [inscripciones, setInscripciones] = useState<Inscripcion[]>([]);
+    const [socios, setSocios] = useState<any[]>([]);
+    const [loterias, setLoterias] = useState<any[]>([]);
+    const [cargosData, setCargosData] = useState<Record<string, TransactionState>>({});
+    const [loading, setLoading] = useState(true);
+    const [isAdmin, setIsAdmin] = useState(false);
+    const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [processingId, setProcessingId] = useState<string | null>(null);
+    const [searchTerm, setSearchTerm] = useState('');
+
+    // Partial payment modal
+    const [payingSocio, setPayingSocio] = useState<any | null>(null);
+    const [paymentAmount, setPaymentAmount] = useState<string>('');
+
+    const router = useRouter();
+    const pathname = usePathname();
+
+    useEffect(() => {
+        checkAdmin();
+    }, []);
+
+    const checkAdmin = async () => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+            router.push('/login');
+            return;
+        }
+
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', user.id)
+            .single();
+
+        if (profile?.role !== 'admin') {
+            router.push('/perfil');
+            return;
+        }
+
+        setIsAdmin(true);
+        fetchEventos();
+    };
+
+    const fetchEventos = async () => {
+        setLoading(true);
+        const { data } = await supabase
+            .from('eventos')
+            .select('*')
+            .order('fecha', { ascending: false });
+        if (data) setEventos(data);
+
+        const { data: sorteosData } = await supabase
+            .from('sorteos')
+            .select('*')
+            .order('created_at', { ascending: false });
+        if (sorteosData) setSorteos(sorteosData);
+
+        // Fetch all socios for Cuotas tab
+        const { data: sData } = await supabase
+            .from('socios')
+            .select('*, cuotas(nombre, monto)')
+            .eq('is_active', true)
+            .order('primer_apellido', { ascending: true });
+        if (sData) setSocios(sData);
+
+        setLoading(false);
+    };
+
+    const fetchDebtsAndPayments = async (category: string, conceptFilter?: string) => {
+        let query = supabase
+            .from('pagos_cobros')
+            .select('id, socio_id, estado, concepto, monto, tipo, parent_id')
+            .eq('categoria', category);
+
+        if (conceptFilter) {
+            query = query.ilike('concepto', `%${conceptFilter}%`);
+        }
+
+        const { data: chargesData } = await query;
+
+        if (chargesData) {
+            const dataMap: Record<string, TransactionState> = {};
+
+            // First identify debts (cobro)
+            chargesData.filter(c => c.tipo === 'cobro').forEach(c => {
+                const state: TransactionState = {
+                    id: c.id,
+                    monto: Number(c.monto),
+                    pagado: 0,
+                    estado: c.estado as any,
+                    is_automatic: c.concepto.toLowerCase().includes('inscripción'),
+                    concepto: c.concepto
+                };
+                dataMap[c.id] = state; // Map by Debt ID
+                dataMap[c.socio_id] = state; // Map by Socio ID (fallback)
+            });
+
+            // Then add payments (pago) linked to those debts
+            chargesData.filter(c => c.tipo === 'pago').forEach(c => {
+                const debtId = c.parent_id;
+                if (debtId && dataMap[debtId]) {
+                    dataMap[debtId].pagado += Number(c.monto);
+                } else if (dataMap[c.socio_id]) {
+                    // Fallback for older records or if parent_id is missing
+                    dataMap[c.socio_id].pagado += Number(c.monto);
+                }
+            });
+
+            setCargosData(dataMap);
+        } else {
+            setCargosData({});
+        }
+    };
+
+    const handleSelectEvento = async (evento: Evento) => {
+        setSelectedEvento(evento);
+        setLoading(true);
+
+        // Fetch inscripciones
+        const { data: insData } = await supabase
+            .from('inscripciones_eventos')
+            .select('*, socios(nombre, primer_apellido)')
+            .eq('evento_id', evento.id);
+
+        if (insData) setInscripciones(insData as any);
+
+        await fetchDebtsAndPayments('Evento', evento.denominacion);
+
+        setLoading(false);
+    };
+
+    const handleSelectSorteo = async (sorteo: any) => {
+        setSelectedSorteo(sorteo);
+        setLoading(true);
+
+        const { data: loteriaData } = await supabase
+            .from('loterias_asignadas')
+            .select('*, socios(nombre, primer_apellido), sorteos(descripcion, precio, recargo)')
+            .eq('sorteo_id', sorteo.id)
+            .order('created_at', { ascending: false });
+
+        if (loteriaData) setLoterias(loteriaData);
+
+        await fetchDebtsAndPayments('Lotería', sorteo.descripcion);
+
+        setLoading(false);
+    };
+
+    useEffect(() => {
+        if (activeTab === 'cuotas') {
+            fetchDebtsAndPayments('Cuota');
+        } else if (activeTab === 'loteria' && selectedSorteo) {
+            handleSelectSorteo(selectedSorteo);
+        } else if (activeTab === 'eventos' && selectedEvento) {
+            handleSelectEvento(selectedEvento);
+        }
+    }, [activeTab]);
+
+    const handleChargeEvent = async (ins: Inscripcion) => {
+        if (!selectedEvento) return;
+        setProcessingId(ins.socio_id);
+
+        const total = selectedEvento.precio_socio + (ins.numero_invitados * selectedEvento.precio_invitado);
+
+        const { data, error } = await supabase
+            .from('pagos_cobros')
+            .insert([{
+                socio_id: ins.socio_id,
+                tipo: 'cobro',
+                monto: total,
+                concepto: `Evento: ${selectedEvento.denominacion} (${ins.numero_invitados} invitados)`,
+                categoria: 'Evento',
+                estado: 'pendiente'
+            }])
+            .select()
+            .single();
+
+        if (!error && data) {
+            setCargosData({
+                ...cargosData,
+                [ins.socio_id]: {
+                    id: data.id,
+                    monto: total,
+                    pagado: 0,
+                    estado: 'pendiente',
+                    is_automatic: false,
+                    concepto: data.concepto
+                }
+            });
+        } else if (error) {
+            alert('Error al generar el cobro: ' + error.message);
+        }
+        setProcessingId(null);
+    };
+
+    const handleLiquidatePartial = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!payingSocio) return;
+
+        const cargo = cargosData[payingSocio.socio_id];
+        if (!cargo) return;
+
+        const amount = parseFloat(paymentAmount);
+        if (isNaN(amount) || amount <= 0) {
+            alert('Por favor, indica un monto válido.');
+            return;
+        }
+
+        setLoading(true);
+
+        // Record the payment
+        const { data: paymentRecord, error: pError } = await supabase
+            .from('pagos_cobros')
+            .insert([{
+                socio_id: payingSocio.socio_id,
+                tipo: 'pago',
+                monto: amount,
+                concepto: `Abono parcial: ${cargo.concepto}`,
+                categoria: activeTab === 'eventos' ? 'Evento' : activeTab === 'cuotas' ? 'Cuota' : 'Lotería',
+                estado: 'completado',
+                metodo_pago: 'Efectivo',
+                parent_id: cargo.id
+            }])
+            .select()
+            .single();
+
+        if (!pError) {
+            const newPagado = cargo.pagado + amount;
+            const isFullyPaid = newPagado >= cargo.monto;
+
+            // If fully paid, update original debt status
+            if (isFullyPaid) {
+                await supabase
+                    .from('pagos_cobros')
+                    .update({ estado: 'completado' })
+                    .eq('id', cargo.id);
+            }
+
+            setCargosData({
+                ...cargosData,
+                [payingSocio.socio_id]: {
+                    ...cargo,
+                    pagado: newPagado,
+                    estado: isFullyPaid ? 'completado' : 'pendiente'
+                }
+            });
+            setPayingSocio(null);
+            setPaymentAmount('');
+        } else {
+            alert('Error al registrar el abono: ' + pError.message);
+        }
+        setLoading(false);
+    };
+
+    const handleChargeQuota = async (socio: any) => {
+        if (!socio.cuotas) return;
+        setProcessingId(socio.id);
+
+        const { data, error } = await supabase
+            .from('pagos_cobros')
+            .insert([{
+                socio_id: socio.id,
+                tipo: 'cobro',
+                monto: socio.cuotas.monto,
+                concepto: `Cuota Anual 2026: ${socio.cuotas.nombre}`,
+                categoria: 'Cuota',
+                estado: 'pendiente'
+            }])
+            .select()
+            .single();
+
+        if (!error && data) {
+            setCargosData({
+                ...cargosData,
+                [socio.id]: {
+                    id: data.id,
+                    monto: socio.cuotas.monto,
+                    pagado: 0,
+                    estado: 'pendiente',
+                    is_automatic: false,
+                    concepto: data.concepto
+                }
+            });
+        }
+        setProcessingId(null);
+    };
+
+    const handleChargeLoteria = async (loteria: any) => {
+        setProcessingId(loteria.id); // Use assignment ID as temporary processing ID
+
+        const { data, error } = await supabase
+            .from('pagos_cobros')
+            .insert([{
+                socio_id: loteria.socio_id,
+                tipo: 'cobro',
+                monto: loteria.total_monto,
+                concepto: `Lotería: ${loteria.sorteos.descripcion}`,
+                categoria: 'Lotería',
+                estado: 'pendiente'
+            }])
+            .select()
+            .single();
+
+        if (!error && data) {
+            // Update the lottery assignment to link it with the debt
+            await supabase
+                .from('loterias_asignadas')
+                .update({ pago_id: data.id })
+                .eq('id', loteria.id);
+
+            setCargosData({
+                ...cargosData,
+                [loteria.socio_id]: {
+                    id: data.id,
+                    monto: Number(loteria.total_monto),
+                    pagado: 0,
+                    estado: 'pendiente',
+                    is_automatic: false,
+                    concepto: data.concepto
+                }
+            });
+
+            // Update local loterias state to reflect the link
+            setLoterias(prev => prev.map(l => l.id === loteria.id ? { ...l, pago_id: data.id } : l));
+        }
+        setProcessingId(null);
+    };
+
+    const handleDeleteCharge = async (socio: any) => {
+        const cargo = cargosData[socio.socio_id];
+        if (!cargo || !confirm('¿Estás seguro de eliminar este cargo pendiente?')) return;
+
+        setProcessingId(activeTab === 'loteria' ? socio.id : socio.socio_id);
+        const { error } = await supabase
+            .from('pagos_cobros')
+            .delete()
+            .eq('id', cargo.id);
+
+        if (!error) {
+            const newData = { ...cargosData };
+            delete newData[socio.socio_id];
+            setCargosData(newData);
+        } else {
+            alert('Error al eliminar cargo: ' + error.message);
+        }
+        setProcessingId(null);
+    };
+
+    if (!isAdmin || (loading && eventos.length === 0)) {
+        return (
+            <div className="min-h-screen flex flex-col items-center justify-center bg-fila-light">
+                <Loader2 className="w-12 h-12 text-fila-gold animate-spin mb-4" />
+                <p className="text-fila-dark font-bold">Cargando Sección de Cobros...</p>
+            </div>
+        );
+    }
+
+    const NavItem = ({ href, icon: Icon, label }: { href: string; icon: any; label: string }) => {
+        const isActive = pathname === href;
+        return (
+            <Link
+                href={href}
+                className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${isActive ? 'bg-fila-gold text-white shadow-lg shadow-fila-gold/20' : 'text-gray-500 hover:bg-fila-light hover:text-fila-dark'}`}
+            >
+                <Icon size={20} />
+                <span>{label}</span>
+            </Link>
+        );
+    };
+
+    const filteredInscripciones = inscripciones.filter(ins =>
+        `${ins.socios.nombre} ${ins.socios.primer_apellido}`.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    return (
+        <main className="min-h-screen bg-[#F8F9FA] flex">
+            {/* Side Menu */}
+            <aside className={`
+                fixed inset-y-0 left-0 w-72 bg-white border-r border-gray-200 z-[70] flex flex-col p-6 transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0
+                ${isMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'}
+            `}>
+                <div className="flex items-center justify-between mb-10 px-2">
+                    <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-fila-dark rounded-xl flex items-center justify-center text-fila-gold">
+                            <Shield size={24} />
+                        </div>
+                        <div>
+                            <p className="text-xs font-black text-fila-gold uppercase tracking-[0.2em]">Panel Admin</p>
+                            <h2 className="text-lg font-black text-fila-dark leading-none">CASTELL</h2>
+                        </div>
+                    </div>
+                </div>
+
+                <nav className="flex-1 space-y-2">
+                    <NavItem href="/admin" icon={Users} label="Gestión Socios" />
+                    <NavItem href="/admin/cobros" icon={Euro} label="Gestión Cobros" />
+                    <NavItem href="/admin/cuotas" icon={Euro} label="Configurar Cuotas" />
+                    <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
+                    <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
+                </nav>
+
+                <div className="pt-6 border-t border-gray-100 space-y-2">
+                    <Link href="/perfil" className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-gray-500 hover:bg-gray-50 transition-all">
+                        <ArrowLeft size={20} />
+                        <span>Volver al Perfil</span>
+                    </Link>
+                    <button
+                        onClick={async () => { await supabase.auth.signOut(); router.push('/'); }}
+                        className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold text-red-500 hover:bg-red-50 transition-all w-full text-left"
+                    >
+                        <LogOut size={20} />
+                        <span>Cerrar Sesión</span>
+                    </button>
+                </div>
+            </aside>
+
+            {/* Content Area */}
+            <div className="flex-1 flex flex-col">
+                <nav className="bg-white/80 backdrop-blur-md border-b border-gray-100 px-8 py-4 flex flex-col md:flex-row md:items-center justify-between sticky top-0 z-40 gap-4">
+                    <div className="flex items-center gap-3">
+                        <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="lg:hidden p-2.5 bg-fila-light text-fila-dark rounded-xl">
+                            <MoreVertical size={20} />
+                        </button>
+                        <h1 className="text-xl font-black text-fila-dark uppercase tracking-tighter shrink-0">Gestión de Cobros</h1>
+                    </div>
+
+                    <div className="flex bg-gray-100/50 p-1 rounded-2xl">
+                        <button
+                            onClick={() => setActiveTab('eventos')}
+                            className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'eventos' ? 'bg-white text-fila-dark shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                        >
+                            Eventos
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('cuotas')}
+                            className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'cuotas' ? 'bg-white text-fila-dark shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                        >
+                            Cuotas
+                        </button>
+                        <button
+                            onClick={() => setActiveTab('loteria')}
+                            className={`px-6 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'loteria' ? 'bg-white text-fila-dark shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                        >
+                            Lotería
+                        </button>
+                    </div>
+                </nav>
+
+                <div className="flex flex-col lg:flex-row gap-8">
+                    {/* Left Sidebar: Selectors */}
+                    <div className="w-full lg:w-96 shrink-0">
+                        {activeTab === 'eventos' || activeTab === 'loteria' ? (
+                            <div className="space-y-4">
+                                <div className="flex items-center gap-3 px-2 mb-6">
+                                    <div className="w-1.5 h-8 bg-fila-gold rounded-full"></div>
+                                    <h3 className="text-xl font-black text-fila-dark uppercase tracking-tight">Seleccionar {activeTab === 'eventos' ? 'Evento' : 'Sorteo'}</h3>
+                                </div>
+                                <div className="space-y-3">
+                                    {(activeTab === 'eventos' ? eventos : sorteos).map((item) => {
+                                        const isSelected = activeTab === 'eventos' ? selectedEvento?.id === item.id : selectedSorteo?.id === item.id;
+                                        return (
+                                            <button
+                                                key={item.id}
+                                                onClick={() => activeTab === 'eventos' ? handleSelectEvento(item) : handleSelectSorteo(item)}
+                                                className={`w-full p-6 rounded-[32px] text-left transition-all border-2 flex flex-col gap-2 ${isSelected
+                                                    ? 'bg-fila-green border-fila-green shadow-xl shadow-fila-green/20 -translate-y-1'
+                                                    : 'bg-white border-gray-100 hover:border-fila-gold/30 hover:bg-gray-50'
+                                                    }`}
+                                            >
+                                                <div className="flex justify-between items-start">
+                                                    <span className={`text-[10px] font-black uppercase tracking-widest ${isSelected ? 'text-white/70' : 'text-fila-gold'}`}>
+                                                        {activeTab === 'eventos' ? new Date(item.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long' }) : item.numero ? `Nº ${item.numero}` : 'Extraordinario'}
+                                                    </span>
+                                                    <div className={`p-1.5 rounded-lg ${isSelected ? 'bg-white/20' : 'bg-gray-100'}`}>
+                                                        {activeTab === 'eventos' ? <Calendar size={14} className={isSelected ? 'text-white' : 'text-gray-400'} /> : <Ticket size={14} className={isSelected ? 'text-white' : 'text-gray-400'} />}
+                                                    </div>
+                                                </div>
+                                                <h4 className={`font-black text-lg leading-tight uppercase tracking-tight ${isSelected ? 'text-white' : 'text-fila-dark'}`}>
+                                                    {activeTab === 'eventos' ? item.denominacion : item.descripcion}
+                                                </h4>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm text-center">
+                                <div className="w-16 h-16 bg-fila-light rounded-2xl flex items-center justify-center text-fila-gold mx-auto mb-4">
+                                    {activeTab === 'cuotas' ? <Euro size={32} /> : <Ticket size={32} />}
+                                </div>
+                                <h3 className="text-lg font-black text-fila-dark uppercase leading-none mb-2">
+                                    {activeTab === 'cuotas' ? 'Gestión de Cuotas' : 'Gestión de Lotería'}
+                                </h3>
+                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                                    {activeTab === 'cuotas' ? 'Liquidación de cuotas anuales' : 'Cobro de décimos asignados'}
+                                </p>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Main Panel: List & Balance */}
+                    <div className="flex-1 bg-white rounded-[40px] border border-gray-100 shadow-sm flex flex-col overflow-hidden">
+                        {(activeTab === 'eventos' && !selectedEvento) || (activeTab === 'loteria' && !selectedSorteo) ? (
+                            <div className="flex-1 flex flex-col items-center justify-center p-10 text-center">
+                                <div className="w-20 h-20 bg-fila-light rounded-full flex items-center justify-center text-fila-gold mb-4">
+                                    {activeTab === 'eventos' ? <Calendar size={40} /> : <Ticket size={40} />}
+                                </div>
+                                <h3 className="text-xl font-black text-fila-dark uppercase">Selecciona un {activeTab === 'eventos' ? 'evento' : 'sorteo'}</h3>
+                                <p className="text-gray-400 mt-2">Para ver y gestionar los cobros correspondientes.</p>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="p-8 border-b border-gray-50 bg-fila-light/30">
+                                    <div className="flex justify-between items-center mb-6">
+                                        <div>
+                                            <h3 className="text-2xl font-black text-fila-dark tracking-tighter uppercase whitespace-nowrap">
+                                                {activeTab === 'eventos' ? selectedEvento?.denominacion : activeTab === 'cuotas' ? 'Cuotas Anuales 2026' : 'Lotería de Navidad'}
+                                            </h3>
+                                            <p className="text-xs font-bold text-fila-gold uppercase tracking-widest">
+                                                {activeTab === 'eventos' ? 'Cobros por inscripción' : activeTab === 'cuotas' ? 'Cuotas por tipo de socio' : 'Décimos por sorteo'}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="relative">
+                                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                                        <input
+                                            type="text"
+                                            placeholder={`Buscar por nombre de socio...`}
+                                            value={searchTerm}
+                                            onChange={e => setSearchTerm(e.target.value)}
+                                            className="w-full pl-12 pr-6 py-4 rounded-2xl bg-white border border-gray-100 focus:border-fila-gold outline-none font-bold text-sm shadow-sm"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="flex-1 overflow-y-auto p-8">
+                                    {loading ? (
+                                        <div className="flex items-center justify-center py-20">
+                                            <Loader2 className="animate-spin text-fila-gold" size={30} />
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-4">
+                                            {/* Unified List Rendering for all tabs */}
+                                            {(activeTab === 'eventos' ? filteredInscripciones : activeTab === 'cuotas' ? socios : loterias).filter(item => {
+                                                const socioId = activeTab === 'eventos' ? item.socio_id : activeTab === 'cuotas' ? item.id : item.socio_id;
+                                                const cargo = (activeTab === 'loteria' && item.pago_id) ? cargosData[item.pago_id] : cargosData[socioId];
+
+                                                // Only show if no cargo exists yet, OR if it's NOT completed
+                                                const isPending = !cargo || cargo.estado !== 'completado';
+                                                if (!isPending) return false;
+
+                                                const name = activeTab === 'eventos' ? `${item.socios.nombre} ${item.socios.primer_apellido}` : activeTab === 'cuotas' ? `${item.nombre} ${item.primer_apellido}` : `${item.socios.nombre} ${item.socios.primer_apellido}`;
+                                                return name.toLowerCase().includes(searchTerm.toLowerCase());
+                                            }).map(item => {
+                                                const socioId = activeTab === 'eventos' ? item.socio_id : activeTab === 'cuotas' ? item.id : item.socio_id;
+                                                const cargo = (activeTab === 'loteria' && item.pago_id) ? cargosData[item.pago_id] : cargosData[socioId];
+                                                const isProcessing = processingId === (activeTab === 'loteria' ? item.id : socioId);
+                                                const name = activeTab === 'eventos' ? `${item.socios.nombre} ${item.socios.primer_apellido}` : activeTab === 'cuotas' ? `${item.nombre} ${item.primer_apellido}` : `${item.socios.nombre} ${item.socios.primer_apellido}`;
+
+                                                let total = 0;
+                                                if (activeTab === 'eventos' && selectedEvento) {
+                                                    total = selectedEvento.precio_socio + (item.numero_invitados * selectedEvento.precio_invitado);
+                                                } else if (activeTab === 'cuotas' && item.cuotas) {
+                                                    total = Number(item.cuotas.monto);
+                                                } else if (activeTab === 'loteria' && item.total_monto) {
+                                                    total = Number(item.total_monto);
+                                                }
+
+                                                return (
+                                                    <div key={item.id} className="p-5 rounded-3xl border border-gray-50 bg-gray-50/50 flex flex-col md:flex-row md:items-center justify-between hover:bg-white hover:shadow-md transition-all group gap-4 md:gap-0">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black shrink-0 ${cargo?.estado === 'completado' ? 'bg-green-100 text-green-600' : cargo?.estado === 'pendiente' ? 'bg-orange-100 text-orange-600' : 'bg-white text-fila-dark shadow-sm'}`}>
+                                                                {cargo?.estado === 'completado' ? <CheckCircle2 size={24} /> : name[0]}
+                                                            </div>
+                                                            <div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <h4 className="font-black text-fila-dark uppercase tracking-tight">{name}</h4>
+                                                                    {cargo?.is_automatic && (
+                                                                        <div title="Generado automáticamente" className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-50 text-blue-500 rounded-lg">
+                                                                            <Shield size={10} className="fill-blue-500" />
+                                                                            <span className="text-[8px] font-black uppercase">Auto</span>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                                                                    {activeTab === 'eventos' ? `${item.numero_invitados} invitados • Total: ${total}€` : activeTab === 'cuotas' ? `${item.cuotas?.nombre || 'Sin cuota'} • Monto: ${total}€` : `${item.sorteos.descripcion} • Cant: ${item.cantidad} • Total: ${total}€`}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex items-center gap-3">
+                                                            {cargo ? (
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className="text-right mr-2 hidden sm:block">
+                                                                        <p className="text-[8px] font-black text-gray-400 uppercase tracking-widest leading-none mb-1">Pagado / Restante</p>
+                                                                        <p className="text-xs font-black text-fila-dark">
+                                                                            {cargo.pagado.toFixed(2)}€ / <span className="text-red-500">{(cargo.monto - cargo.pagado).toFixed(2)}€</span>
+                                                                        </p>
+                                                                    </div>
+
+                                                                    {cargo.estado === 'pendiente' ? (
+                                                                        <div className="flex items-center gap-2">
+                                                                            <div className="px-3 py-1.5 bg-orange-50 text-orange-600 rounded-xl text-[9px] font-black uppercase tracking-widest border border-orange-100 whitespace-nowrap">
+                                                                                {cargo.pagado > 0 ? 'Liquidación Parcial' : 'Deuda Pendiente'}
+                                                                            </div>
+                                                                            <div className="flex gap-1">
+                                                                                <button
+                                                                                    onClick={() => { setPayingSocio({ socio_id: socioId, nombre: name }); setPaymentAmount((cargo.monto - cargo.pagado).toString()); }}
+                                                                                    disabled={isProcessing}
+                                                                                    title="Realizar Liquidación"
+                                                                                    className="p-3 bg-green-500 text-white rounded-xl hover:bg-green-600 transition-all shadow-sm"
+                                                                                >
+                                                                                    <Euro size={16} />
+                                                                                </button>
+                                                                                {cargo.pagado === 0 && (
+                                                                                    <button
+                                                                                        onClick={() => handleDeleteCharge({ socio_id: socioId } as any)}
+                                                                                        disabled={isProcessing}
+                                                                                        title="Eliminar Cargo"
+                                                                                        className="p-3 bg-red-50 text-red-300 hover:text-red-500 hover:bg-red-100 rounded-xl transition-all"
+                                                                                    >
+                                                                                        <X size={16} />
+                                                                                    </button>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="px-4 py-2 bg-green-50 text-green-600 rounded-xl text-[10px] font-black uppercase tracking-widest border border-green-100 flex items-center gap-2">
+                                                                            <CheckCircle2 size={14} />
+                                                                            Liquidado
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ) : (
+                                                                <button
+                                                                    onClick={() => activeTab === 'eventos' ? handleChargeEvent(item) : activeTab === 'cuotas' ? handleChargeQuota(item) : handleChargeLoteria(item)}
+                                                                    disabled={isProcessing || (activeTab === 'cuotas' && !item.cuota_id)}
+                                                                    className="px-6 py-3 bg-white border border-gray-200 text-fila-gold rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-fila-gold hover:text-white hover:border-fila-gold transition-all shadow-sm disabled:opacity-50"
+                                                                >
+                                                                    {isProcessing ? <Loader2 size={16} className="animate-spin" /> : 'Generar Cargo'}
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+
+                                            {(activeTab === 'eventos' ? filteredInscripciones : activeTab === 'cuotas' ? socios : loterias).length === 0 && (
+                                                <div className="text-center py-20 bg-gray-50/50 rounded-3xl border-2 border-dashed border-gray-100">
+                                                    <p className="text-gray-400 font-bold">No se encontró información para mostrar.</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                {/* Partial Liquidation Modal */}
+                {payingSocio && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-md rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                            <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-fila-green text-white">
+                                <div>
+                                    <h2 className="text-xl font-black tracking-tighter uppercase leading-none mb-1">Registrar Pago</h2>
+                                    <p className="text-[10px] text-white/70 font-black uppercase tracking-[0.2em]">{payingSocio.nombre}</p>
+                                </div>
+                                <button onClick={() => setPayingSocio(null)} className="p-2 hover:bg-white/10 rounded-full transition-all">
+                                    <X size={24} />
+                                </button>
+                            </div>
+                            <form onSubmit={handleLiquidatePartial} className="p-10 space-y-6">
+                                <div className="p-6 bg-gray-50 rounded-3xl space-y-3">
+                                    <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-widest">
+                                        <span>Total Deuda</span>
+                                        <span className="text-fila-dark font-black">{cargosData[payingSocio.socio_id]?.monto.toFixed(2)}€</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-xs font-bold text-gray-400 uppercase tracking-widest">
+                                        <span>Ya abonado</span>
+                                        <span className="text-fila-green font-black">{cargosData[payingSocio.socio_id]?.pagado.toFixed(2)}€</span>
+                                    </div>
+                                    <div className="pt-3 border-t border-gray-200 flex justify-between items-center uppercase tracking-widest">
+                                        <span className="text-[10px] font-black text-fila-gold">Remanente</span>
+                                        <span className="text-lg font-black text-red-500">{(cargosData[payingSocio.socio_id]?.monto - cargosData[payingSocio.socio_id]?.pagado).toFixed(2)}€</span>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Monto a liquidar ahora</label>
+                                    <div className="relative">
+                                        <Euro size={20} className="absolute left-5 top-1/2 -translate-y-1/2 text-fila-gold" />
+                                        <input
+                                            type="number"
+                                            step="0.01"
+                                            required
+                                            autoFocus
+                                            value={paymentAmount}
+                                            onChange={e => setPaymentAmount(e.target.value)}
+                                            className="w-full pl-14 pr-6 py-5 rounded-3xl border border-gray-100 focus:border-fila-green outline-none font-black text-2xl text-fila-dark shadow-sm bg-gray-50/30"
+                                            placeholder="0.00"
+                                        />
+                                    </div>
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    disabled={loading}
+                                    className="w-full py-5 rounded-3xl bg-fila-green text-white font-black hover:bg-fila-green/90 transition-all shadow-xl shadow-fila-green/20 flex items-center justify-center gap-2 text-sm tracking-widest uppercase"
+                                >
+                                    {loading ? <Loader2 size={18} className="animate-spin" /> : <Euro size={18} />}
+                                    CONFIRMAR LIQUIDACIÓN
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                )}
+            </div>
+        </main>
+    );
+}

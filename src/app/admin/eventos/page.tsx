@@ -2,26 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import {
-    Calendar,
-    Plus,
-    Edit2,
-    Trash2,
-    Users,
-    MapPin,
-    Music,
-    ArrowLeft,
-    Loader2,
-    X,
-    Save,
-    LayoutDashboard,
-    Euro,
-    Ticket,
-    LogOut,
-    Shield,
-    MoreVertical,
-    Flag
-} from 'lucide-react';
+import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Eye, MoreVertical, LayoutDashboard, Ticket, Euro, Calendar, Search, Users, LogOut, MapPin, Music, Flag } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 
@@ -60,6 +41,7 @@ export default function AdminEventos() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingEvento, setEditingEvento] = useState<Evento | null>(null);
     const [viewingInscripciones, setViewingInscripciones] = useState<Evento | null>(null);
+    const [searchTerm, setSearchTerm] = useState('');
 
     const router = useRouter();
     const pathname = usePathname();
@@ -228,6 +210,12 @@ export default function AdminEventos() {
         );
     };
 
+    const filteredEventos = eventos.filter(e =>
+        e.denominacion.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (e.descripcion && e.descripcion.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (e.ubicacion && e.ubicacion.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+
     return (
         <main className="min-h-screen bg-[#F8F9FA] flex">
             {/* Mobile Sidebar Overlay */}
@@ -254,9 +242,10 @@ export default function AdminEventos() {
 
                 <nav className="flex-1 space-y-2">
                     <NavItem href="/admin" icon={Users} label="Gestión Socios" />
+                    <NavItem href="/admin/cobros" icon={Euro} label="Gestión Cobros" />
                     <NavItem href="/admin/cuotas" icon={Euro} label="Configurar Cuotas" />
                     <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
-                    <NavItem href="/admin/eventos" icon={LayoutDashboard} label="Gestión Eventos" />
+                    <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
                 </nav>
 
                 <div className="pt-6 border-t border-gray-100 space-y-2">
@@ -282,24 +271,37 @@ export default function AdminEventos() {
                         <button onClick={() => setIsMenuOpen(true)} className="lg:hidden p-2.5 bg-fila-light text-fila-dark rounded-xl hover:bg-gray-200 transition-all">
                             <MoreVertical size={20} />
                         </button>
-                        <div>
+                        <div className="hidden sm:block">
                             <h1 className="text-lg md:text-xl font-black text-fila-dark tracking-tighter uppercase leading-none">Gestión de Eventos</h1>
                             <span className="text-[9px] font-black text-fila-gold uppercase tracking-widest">{eventos.length} TOTAL</span>
                         </div>
                     </div>
-                    <button
-                        onClick={() => { setEditingEvento(null); setIsModalOpen(true); }}
-                        className="p-2.5 md:px-5 md:py-2.5 bg-fila-green text-white rounded-xl md:rounded-2xl hover:bg-fila-green/90 transition-all shadow-xl shadow-fila-green/10 flex items-center gap-2"
-                    >
-                        <Plus size={18} />
-                        <span className="hidden md:inline text-sm font-black uppercase tracking-tight">Nuevo Evento</span>
-                    </button>
+
+                    <div className="flex items-center gap-2 md:gap-4 flex-1 justify-end">
+                        <div className="relative flex-1 max-w-[150px] md:max-w-xs">
+                            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                            <input
+                                type="text"
+                                placeholder="Buscar evento..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-10 pr-4 py-2 md:py-2.5 rounded-xl border border-gray-200 focus:border-fila-gold outline-none text-xs md:text-sm transition-all"
+                            />
+                        </div>
+                        <button
+                            onClick={() => { setEditingEvento(null); setIsModalOpen(true); }}
+                            className="p-2.5 md:px-5 md:py-2.5 bg-fila-green text-white rounded-xl md:rounded-2xl hover:bg-fila-green/90 transition-all shadow-xl shadow-fila-green/10 flex items-center gap-2"
+                        >
+                            <Plus size={18} />
+                            <span className="hidden md:inline text-sm font-black uppercase tracking-tight">Nuevo</span>
+                        </button>
+                    </div>
                 </nav>
 
                 <div className="p-4 md:p-8">
                     {/* Events Grid */}
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                        {eventos.map((evento) => (
+                        {filteredEventos.map((evento) => (
                             <div key={evento.id} className="bg-white rounded-[40px] border border-gray-100 shadow-sm p-6 hover:shadow-md transition-all group">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="bg-fila-light p-3 rounded-2xl text-fila-gold">

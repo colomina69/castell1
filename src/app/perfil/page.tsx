@@ -29,6 +29,7 @@ interface Transaction {
     tipo: 'cobro' | 'pago';
     monto: number;
     concepto: string;
+    categoria: string;
     fecha: string;
     estado: 'pendiente' | 'completado' | 'cancelado';
 }
@@ -108,6 +109,7 @@ export default function PerfilPage() {
                     .from('pagos_cobros')
                     .select('*')
                     .eq('socio_id', data.id)
+                    .order('categoria', { ascending: true })
                     .order('fecha', { ascending: false });
                 if (tData) setTransactions(tData);
 
@@ -147,9 +149,33 @@ export default function PerfilPage() {
             }]);
 
         if (!error) {
+            // Generar cargo pendiente automáticamente
+            const invitadosNum = parseInt(registrationForm.numero_invitados) || 0;
+            const total = registeringEvento.precio_socio + (invitadosNum * registeringEvento.precio_invitado);
+
+            await supabase
+                .from('pagos_cobros')
+                .insert([{
+                    socio_id: socio.id,
+                    tipo: 'cobro',
+                    monto: total,
+                    concepto: `Inscripción Evento: ${registeringEvento.denominacion} (${invitadosNum} invitados)`,
+                    categoria: 'Evento',
+                    estado: 'pendiente'
+                }]);
+
             setMisInscripciones([...misInscripciones, registeringEvento.id]);
             setRegisteringEvento(null);
             setRegistrationForm({ grupo: '', numero_invitados: '0' });
+
+            // Refresh transactions
+            const { data: tData } = await supabase
+                .from('pagos_cobros')
+                .select('*')
+                .eq('socio_id', socio.id)
+                .order('categoria', { ascending: true })
+                .order('fecha', { ascending: false });
+            if (tData) setTransactions(tData);
         } else {
             console.error('Error al registrarse:', error.message);
         }
@@ -332,35 +358,44 @@ export default function PerfilPage() {
                             <div className="w-10 h-10 rounded-xl bg-fila-dark flex items-center justify-center text-white">
                                 <Euro size={18} />
                             </div>
-                            <h3 className="text-xl font-black text-fila-dark tracking-tighter uppercase">Historial de Cuotas y Pagos</h3>
+                            <h3 className="text-xl font-black text-fila-dark tracking-tighter uppercase">Historial de Cobros y Pagos</h3>
                         </div>
                     </div>
 
                     <div className="divide-y divide-gray-100">
                         {transactions.length > 0 ? (
-                            transactions.map((t) => (
-                                <div key={t.id} className="p-6 hover:bg-fila-light/30 transition-all flex items-center justify-between gap-4">
-                                    <div className="flex items-center gap-4">
-                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.tipo === 'pago' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
-                                            <Euro size={16} />
-                                        </div>
-                                        <div>
-                                            <p className="font-bold text-fila-dark">{t.concepto}</p>
-                                            <p className="text-xs text-gray-400">
-                                                {new Date(t.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
-                                            </p>
-                                        </div>
+                            Array.from(new Set(transactions.map(t => t.categoria || 'Varios'))).map(cat => (
+                                <div key={cat} className="animate-in fade-in duration-500">
+                                    <div className="px-8 py-3 bg-fila-light/30 border-y border-gray-100/50">
+                                        <h4 className="text-[10px] font-black text-fila-gold uppercase tracking-[0.2em]">{cat}</h4>
                                     </div>
-                                    <div className="text-right">
-                                        <p className={`font-black text-lg ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
-                                            {t.tipo === 'pago' ? '+' : '-'}{t.monto}€
-                                        </p>
-                                        <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${t.estado === 'completado' ? 'bg-green-50 text-green-600' :
-                                            t.estado === 'pendiente' ? 'bg-orange-50 text-orange-600' :
-                                                'bg-gray-50 text-gray-400'
-                                            }`}>
-                                            {t.estado}
-                                        </span>
+                                    <div className="divide-y divide-gray-100">
+                                        {transactions.filter(t => (t.categoria || 'Varios') === cat).map((t) => (
+                                            <div key={t.id} className="p-6 hover:bg-fila-light/20 transition-all flex items-center justify-between gap-4">
+                                                <div className="flex items-center gap-4">
+                                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.tipo === 'pago' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
+                                                        <Euro size={16} />
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-bold text-fila-dark">{t.concepto}</p>
+                                                        <p className="text-xs text-gray-400">
+                                                            {new Date(t.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className={`font-black text-lg ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
+                                                        {t.tipo === 'pago' ? '+' : '-'}{Number(t.monto).toFixed(2)}€
+                                                    </p>
+                                                    <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${t.estado === 'completado' ? 'bg-green-50 text-green-600' :
+                                                        t.estado === 'pendiente' ? 'bg-orange-50 text-orange-600' :
+                                                            'bg-gray-50 text-gray-400'
+                                                        }`}>
+                                                        {t.estado}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
                             ))

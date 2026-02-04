@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Ticket, LayoutDashboard, Euro, LogOut, MoreVertical } from 'lucide-react';
+import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Ticket, LayoutDashboard, Euro, LogOut, MoreVertical, Calendar, Search, Users } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 
@@ -23,6 +23,7 @@ export default function LoteriaAdmin() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingSorteo, setEditingSorteo] = useState<Sorteo | null>(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState('');
     const [formData, setFormData] = useState({
         descripcion: '',
         precio: '',
@@ -158,6 +159,12 @@ export default function LoteriaAdmin() {
         );
     };
 
+    const filteredSorteos = sorteos.filter(s =>
+        s.descripcion.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (s.numero && s.numero.includes(searchTerm)) ||
+        (s.serie && s.serie.includes(searchTerm))
+    );
+
     return (
         <main className="min-h-screen bg-[#F8F9FA] flex">
             {/* Mobile Sidebar Overlay */}
@@ -189,9 +196,11 @@ export default function LoteriaAdmin() {
                 </div>
 
                 <nav className="flex-1 space-y-2">
-                    <NavItem href="/admin" icon={LayoutDashboard} label="Gestión Socios" />
+                    <NavItem href="/admin" icon={Users} label="Gestión Socios" />
+                    <NavItem href="/admin/cobros" icon={Euro} label="Gestión Cobros" />
                     <NavItem href="/admin/cuotas" icon={Euro} label="Configurar Cuotas" />
                     <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
+                    <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
                 </nav>
 
                 <div className="pt-6 border-t border-gray-100 space-y-2">
@@ -226,23 +235,36 @@ export default function LoteriaAdmin() {
                         >
                             <MoreVertical size={20} />
                         </button>
-                        <div className="flex items-center gap-4">
+                        <div className="hidden sm:flex items-center gap-4">
                             <Ticket size={24} className="text-fila-gold" />
                             <h1 className="text-lg md:text-xl font-black text-fila-dark tracking-tighter uppercase">Gestión de Lotería</h1>
                         </div>
                     </div>
-                    <button
-                        onClick={() => handleOpenModal()}
-                        className="p-2.5 md:px-5 md:py-2.5 bg-fila-green text-white rounded-xl md:rounded-2xl hover:bg-fila-green/90 transition-all shadow-xl shadow-fila-green/10 flex items-center gap-2"
-                    >
-                        <Plus size={18} />
-                        <span className="hidden md:inline text-sm font-black uppercase tracking-tight">Nuevo Sorteo</span>
-                    </button>
+
+                    <div className="flex items-center gap-2 md:gap-4 flex-1 justify-end">
+                        <div className="relative flex-1 max-w-[150px] md:max-w-xs">
+                            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                            <input
+                                type="text"
+                                placeholder="Buscar sorteo..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-10 pr-4 py-2 md:py-2.5 rounded-xl border border-gray-200 focus:border-fila-gold outline-none text-xs md:text-sm transition-all"
+                            />
+                        </div>
+                        <button
+                            onClick={() => handleOpenModal()}
+                            className="p-2.5 md:px-5 md:py-2.5 bg-fila-green text-white rounded-xl md:rounded-2xl hover:bg-fila-green/90 transition-all shadow-xl shadow-fila-green/10 flex items-center gap-2"
+                        >
+                            <Plus size={18} />
+                            <span className="hidden md:inline text-sm font-black uppercase tracking-tight">Nuevo</span>
+                        </button>
+                    </div>
                 </nav>
 
                 <div className="p-4 md:p-8 max-w-6xl mx-auto">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                        {sorteos.map((sorteo) => (
+                        {filteredSorteos.map((sorteo) => (
                             <div key={sorteo.id} className="bg-white p-6 rounded-[32px] border border-gray-200 shadow-sm hover:shadow-md transition-all group relative overflow-hidden">
                                 <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none text-fila-gold">
                                     <Ticket size={80} />
