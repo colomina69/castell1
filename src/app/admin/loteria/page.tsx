@@ -203,6 +203,21 @@ export default function LoteriaAdmin() {
         }
     };
 
+    const handleDelete = async (id: string) => {
+        if (!confirm('¿Estás seguro de eliminar este sorteo? Esto también eliminará las asignaciones vinculadas.')) return;
+
+        const { error } = await supabase
+            .from('sorteos')
+            .delete()
+            .eq('id', id);
+
+        if (error) {
+            alert('Error al eliminar el sorteo: ' + error.message);
+        } else {
+            fetchSorteos();
+        }
+    };
+
     const handleOpenDetails = async (sorteo: Sorteo) => {
         setViewingDetails(sorteo);
         setIsDetailsLoading(true);
