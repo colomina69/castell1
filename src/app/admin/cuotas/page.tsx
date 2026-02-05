@@ -6,6 +6,9 @@ import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Check, Save, Euro, 
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { AdminSidebar } from '@/components/AdminSidebar';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { Download } from 'lucide-react';
 
 interface Quota {
     id: string;
@@ -27,6 +30,12 @@ export default function QuotasAdmin() {
         monto: '',
         descripcion: ''
     });
+
+    // Details Modal State
+    const [selectedQuotaForDetails, setSelectedQuotaForDetails] = useState<Quota | null>(null);
+    const [sociosInQuota, setSociosInQuota] = useState<any[]>([]);
+    const [isDetailsLoading, setIsDetailsLoading] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
 
     const router = useRouter();
     const pathname = usePathname();
@@ -129,6 +138,86 @@ export default function QuotasAdmin() {
         }
     };
 
+    const handleOpenDetails = async (quota: Quota) => {
+        setSelectedQuotaForDetails(quota);
+        setIsDetailsLoading(true);
+
+        try {
+            // Fetch socios in this quota
+            const { data: sociosData } = await supabase
+                .from('socios')
+                .select('*')
+                .eq('cuota_id', quota.id)
+                .eq('is_active', true)
+                .order('primer_apellido', { ascending: true });
+
+            if (sociosData) {
+                // Fetch all records for 'Cuota' category
+                const { data: recordsData } = await supabase
+                    .from('pagos_cobros')
+                    .select('socio_id, monto, tipo, estado')
+                    .eq('categoria', 'Cuota');
+
+                // Map payments to socios
+                const sociosWithPayments = sociosData.map(s => {
+                    const paid = recordsData
+                        ?.filter(p => p.socio_id === s.id && p.tipo === 'pago')
+                        .reduce((sum, p) => sum + Number(p.monto), 0) || 0;
+
+                    return {
+                        ...s,
+                        pagado: paid,
+                        pendiente: quota.monto - paid
+                    };
+                });
+                setSociosInQuota(sociosWithPayments);
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setIsDetailsLoading(false);
+        }
+    };
+
+    const exportData = (format: 'csv' | 'pdf') => {
+        if (!selectedQuotaForDetails) return;
+        setIsExporting(true);
+
+        const data = sociosInQuota.map(s => ([
+            `${s.nombre} ${s.primer_apellido}`,
+            `${selectedQuotaForDetails.monto}€`,
+            `${s.pagado}€`,
+            `${s.pendiente}€`
+        ]));
+
+        if (format === 'csv') {
+            const headers = ['Socio', 'Cuota', 'Pagado', 'Pendiente'];
+            const csvContent = [headers, ...data].map(e => e.join(',')).join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute('download', `socios_cuota_${selectedQuotaForDetails.nombre.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else {
+            const doc = new jsPDF();
+            doc.text(`Listado Socios: ${selectedQuotaForDetails.nombre}`, 14, 20);
+            doc.text(`Importe Cuota: ${selectedQuotaForDetails.monto}€`, 14, 30);
+
+            autoTable(doc, {
+                startY: 40,
+                head: [['Socio', 'Cuota', 'Pagado', 'Pendiente']],
+                body: data,
+                theme: 'striped',
+                headStyles: { fillColor: [153, 101, 21] }
+            });
+
+            doc.save(`socios_cuota_${selectedQuotaForDetails.nombre.replace(/\s+/g, '_')}.pdf`);
+        }
+        setIsExporting(false);
+    };
+
     if (!isAdmin || (loading && quotas.length === 0)) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-fila-light">
@@ -188,20 +277,24 @@ export default function QuotasAdmin() {
                 <div className="p-4 md:p-8 max-w-5xl mx-auto">
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                         {filteredQuotas.map((quota) => (
-                            <div key={quota.id} className="bg-white p-6 rounded-[32px] border border-gray-200 shadow-sm hover:shadow-md transition-all group">
+                            <div
+                                key={quota.id}
+                                onClick={() => handleOpenDetails(quota)}
+                                className="bg-white p-6 rounded-[32px] border border-gray-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group cursor-pointer"
+                            >
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="p-3 bg-fila-light rounded-2xl text-fila-gold shadow-sm">
                                         <Euro size={24} />
                                     </div>
                                     <div className="flex gap-1 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button
-                                            onClick={() => handleOpenModal(quota)}
+                                            onClick={(e) => { e.stopPropagation(); handleOpenModal(quota); }}
                                             className="p-2 text-gray-400 hover:text-fila-gold hover:bg-fila-gold/10 rounded-lg transition-all"
                                         >
                                             <Edit2 size={16} />
                                         </button>
                                         <button
-                                            onClick={() => handleDelete(quota.id)}
+                                            onClick={(e) => { e.stopPropagation(); handleDelete(quota.id); }}
                                             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                                         >
                                             <Trash2 size={16} />
@@ -209,7 +302,14 @@ export default function QuotasAdmin() {
                                     </div>
                                 </div>
                                 <h3 className="text-lg font-black text-fila-dark uppercase tracking-tight mb-1">{quota.nombre}</h3>
-                                <p className="text-3xl font-black text-fila-gold mb-3">{quota.monto}€</p>
+                                <div className="flex items-center gap-3 mb-3">
+                                    <p className="text-3xl font-black text-fila-gold">{quota.monto}€</p>
+                                    <div className="h-4 w-px bg-gray-200" />
+                                    <button className="text-[10px] font-black uppercase text-gray-400 tracking-widest hover:text-fila-gold flex items-center gap-1 transition-colors">
+                                        <Users size={12} />
+                                        Ver Socios
+                                    </button>
+                                </div>
                                 <p className="text-sm text-gray-500 line-clamp-2 leading-relaxed">{quota.descripcion || 'Sin descripción adicional'}</p>
                             </div>
                         ))}
@@ -226,7 +326,7 @@ export default function QuotasAdmin() {
                     )}
                 </div>
 
-                {/* Modal */}
+                {/* Modal de Creación/Edición */}
                 {isModalOpen && (
                     <div className="fixed inset-0 z-[80] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
                         <div className="bg-white w-full max-w-md rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
@@ -289,6 +389,96 @@ export default function QuotasAdmin() {
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* Details Modal */}
+                {selectedQuotaForDetails && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-fila-dark/60 backdrop-blur-md animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-4xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh]">
+                            <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-fila-dark text-white">
+                                <div>
+                                    <h2 className="text-2xl font-black tracking-tighter uppercase leading-none mb-1">{selectedQuotaForDetails.nombre}</h2>
+                                    <p className="text-[10px] text-white/50 font-black uppercase tracking-[0.2em]">Listado de socios y estado de pagos</p>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2 bg-white/10 px-4 py-2 rounded-xl">
+                                        <Download size={16} className="text-fila-gold" />
+                                        <button onClick={() => exportData('csv')} className="text-[10px] font-black uppercase tracking-widest hover:text-fila-gold transition-colors">CSV</button>
+                                        <div className="w-px h-3 bg-white/20 mx-1" />
+                                        <button onClick={() => exportData('pdf')} className="text-[10px] font-black uppercase tracking-widest hover:text-fila-gold transition-colors">PDF</button>
+                                    </div>
+                                    <button onClick={() => setSelectedQuotaForDetails(null)} className="p-2 hover:bg-white/10 rounded-full transition-all">
+                                        <X size={24} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="flex-1 overflow-y-auto p-10">
+                                {isDetailsLoading ? (
+                                    <div className="flex flex-col items-center justify-center py-20 grayscale">
+                                        <Loader2 size={40} className="animate-spin text-fila-gold mb-4" />
+                                        <p className="text-xs font-black uppercase tracking-widest text-gray-400">Consultando base de datos...</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-6">
+                                        {/* Summary Header */}
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                            <div className="bg-fila-light/30 p-6 rounded-3xl border border-gray-100 text-center">
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total Socios</p>
+                                                <p className="text-2xl font-black text-fila-dark">{sociosInQuota.length}</p>
+                                            </div>
+                                            <div className="bg-fila-light/30 p-6 rounded-3xl border border-gray-100 text-center">
+                                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">Total Recaudado</p>
+                                                <p className="text-2xl font-black text-fila-green">{sociosInQuota.reduce((acc, s) => acc + s.pagado, 0)}€</p>
+                                            </div>
+                                            <div className="bg-red-50 p-6 rounded-3xl border border-red-100 text-center">
+                                                <p className="text-[10px] font-black text-red-300 uppercase tracking-widest mb-1">Total Pendiente</p>
+                                                <p className="text-2xl font-black text-red-600">{sociosInQuota.reduce((acc, s) => acc + (s.pendiente > 0 ? s.pendiente : 0), 0)}€</p>
+                                            </div>
+                                        </div>
+
+                                        <div className="overflow-x-auto rounded-3xl border border-gray-100 shadow-sm bg-white">
+                                            <table className="w-full text-left border-collapse">
+                                                <thead className="bg-gray-50 border-b border-gray-100">
+                                                    <tr>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Socio</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Importe</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Pagado</th>
+                                                        <th className="px-6 py-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Estado</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-gray-50">
+                                                    {sociosInQuota.length > 0 ? sociosInQuota.map((s) => (
+                                                        <tr key={s.id} className="hover:bg-gray-50/50 transition-colors">
+                                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                                <p className="font-black text-fila-dark uppercase tracking-tight text-sm">{s.nombre} {s.primer_apellido}</p>
+                                                                <p className="text-[10px] text-gray-400 font-bold">{s.email}</p>
+                                                            </td>
+                                                            <td className="px-6 py-4 whitespace-nowrap font-black text-gray-600">{selectedQuotaForDetails.monto}€</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap font-black text-fila-green">{s.pagado}€</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                                {s.pendiente <= 0 ? (
+                                                                    <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-[9px] font-black uppercase tracking-widest">Pagado</span>
+                                                                ) : (
+                                                                    <span className="px-3 py-1 bg-red-100 text-red-600 rounded-full text-[9px] font-black uppercase tracking-widest">
+                                                                        {s.pendiente}€ Pendiente
+                                                                    </span>
+                                                                )}
+                                                            </td>
+                                                        </tr>
+                                                    )) : (
+                                                        <tr>
+                                                            <td colSpan={4} className="px-6 py-10 text-center text-gray-400 italic text-sm">No hay socios asignados a esta cuota</td>
+                                                        </tr>
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}

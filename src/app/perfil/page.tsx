@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Shield } from '@/components/Shield';
-import { User, Mail, Phone, Calendar, LogOut, Loader2, Award, ShieldCheck, Euro, FileText } from 'lucide-react';
+import { User, Mail, Phone, Calendar, LogOut, Loader2, Award, ShieldCheck, Euro, FileText, Edit2, Key, CheckCircle2, X, AlertCircle, Clock, MapPin } from 'lucide-react';
 import Link from 'next/link';
 import { Navbar } from '@/components/Navbar';
 import { useRouter } from 'next/navigation';
@@ -67,6 +67,23 @@ export default function PerfilPage() {
         grupo: '',
         numero_invitados: '0'
     });
+
+    // Perfil Editing
+    const [isEditing, setIsEditing] = useState(false);
+    const [isChangingPassword, setIsChangingPassword] = useState(false);
+    const [editForm, setEditForm] = useState({
+        nombre: '',
+        primer_apellido: '',
+        segundo_apellido: '',
+        telefono: '',
+        fecha_nacimiento: ''
+    });
+    const [passwordForm, setPasswordForm] = useState({
+        password: '',
+        confirmPassword: ''
+    });
+    const [updateStatus, setUpdateStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+    const [passwordStatus, setPasswordStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const router = useRouter();
 
     useEffect(() => {
@@ -136,6 +153,81 @@ export default function PerfilPage() {
 
         fetchSocioData();
     }, [router]);
+
+    useEffect(() => {
+        if (socio) {
+            setEditForm({
+                nombre: socio.nombre || '',
+                primer_apellido: socio.primer_apellido || '',
+                segundo_apellido: socio.segundo_apellido || '',
+                telefono: socio.telefono || '',
+                fecha_nacimiento: socio.fecha_nacimiento || ''
+            });
+        }
+    }, [socio]);
+
+    const handleUpdateProfile = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!socio) return;
+
+        setUpdateStatus('loading');
+        try {
+            const { error } = await supabase
+                .from('socios')
+                .update({
+                    nombre: editForm.nombre,
+                    primer_apellido: editForm.primer_apellido,
+                    segundo_apellido: editForm.segundo_apellido,
+                    telefono: editForm.telefono,
+                    fecha_nacimiento: editForm.fecha_nacimiento
+                })
+                .eq('id', socio.id);
+
+            if (error) throw error;
+
+            // Optional: Update Auth Full Name
+            await supabase.auth.updateUser({
+                data: { full_name: `${editForm.nombre} ${editForm.primer_apellido}` }
+            });
+
+            setSocio({ ...socio, ...editForm });
+            setUpdateStatus('success');
+            setTimeout(() => {
+                setIsEditing(false);
+                setUpdateStatus('idle');
+            }, 1500);
+        } catch (err: any) {
+            console.error(err);
+            setUpdateStatus('error');
+        }
+    };
+
+    const handleChangePassword = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (passwordForm.password !== passwordForm.confirmPassword) {
+            alert('Las contraseñas no coinciden');
+            return;
+        }
+
+        setPasswordStatus('loading');
+        try {
+            const { error } = await supabase.auth.updateUser({
+                password: passwordForm.password
+            });
+
+            if (error) throw error;
+
+            setPasswordStatus('success');
+            setTimeout(() => {
+                setIsChangingPassword(false);
+                setPasswordStatus('idle');
+                setPasswordForm({ password: '', confirmPassword: '' });
+            }, 1500);
+        } catch (err: any) {
+            console.error(err);
+            setPasswordStatus('error');
+        }
+    };
 
     const handleRegistration = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -383,6 +475,22 @@ export default function PerfilPage() {
                                             {quota ? quota.nombre : 'Sin asignar'}
                                         </p>
                                     </div>
+                                    <div className="flex flex-col gap-2">
+                                        <button
+                                            onClick={() => setIsEditing(true)}
+                                            className="p-3 bg-white border border-gray-100 text-fila-dark rounded-xl hover:bg-gray-50 transition-all shadow-sm flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                                        >
+                                            <Edit2 size={14} className="text-fila-gold" />
+                                            Editar
+                                        </button>
+                                        <button
+                                            onClick={() => setIsChangingPassword(true)}
+                                            className="p-3 bg-white border border-gray-100 text-fila-dark rounded-xl hover:bg-gray-50 transition-all shadow-sm flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                                        >
+                                            <Key size={14} className="text-fila-gold" />
+                                            Seguridad
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -390,7 +498,7 @@ export default function PerfilPage() {
                         {/* Personal Info Grid */}
                         <div className="grid md:grid-cols-2 gap-6">
                             <div className="p-6 bg-fila-light/50 rounded-3xl border border-gray-100 flex items-center gap-5">
-                                <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center text-fila-gold">
+                                <div className="w-12 h-12 rounded-2xl bg-white p-2 shadow-sm flex items-center justify-center text-fila-gold">
                                     <Mail size={20} />
                                 </div>
                                 <div>
@@ -400,7 +508,7 @@ export default function PerfilPage() {
                             </div>
 
                             <div className="p-6 bg-fila-light/50 rounded-3xl border border-gray-100 flex items-center gap-5">
-                                <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center text-fila-gold">
+                                <div className="w-12 h-12 rounded-2xl bg-white p-2 shadow-sm flex items-center justify-center text-fila-gold">
                                     <Phone size={20} />
                                 </div>
                                 <div>
@@ -410,7 +518,7 @@ export default function PerfilPage() {
                             </div>
 
                             <div className="p-6 bg-fila-light/50 rounded-3xl border border-gray-100 flex items-center gap-5">
-                                <div className="w-12 h-12 rounded-2xl bg-white shadow-sm flex items-center justify-center text-fila-gold">
+                                <div className="w-12 h-12 rounded-2xl bg-white p-2 shadow-sm flex items-center justify-center text-fila-gold">
                                     <Calendar size={20} />
                                 </div>
                                 <div>
@@ -689,29 +797,149 @@ export default function PerfilPage() {
                         </div>
                     </div>
                 )}
+
+                {/* Edit Profile Modal */}
+                {isEditing && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                            <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-fila-dark text-white">
+                                <div>
+                                    <h2 className="text-xl font-black tracking-tighter uppercase leading-none mb-1">Editar Perfil</h2>
+                                    <p className="text-[10px] text-white/70 font-black uppercase tracking-[0.2em]">Actualiza tus datos personales</p>
+                                </div>
+                                <button onClick={() => setIsEditing(false)} className="p-2 hover:bg-white/10 rounded-full transition-all">
+                                    <X size={24} />
+                                </button>
+                            </div>
+                            <form onSubmit={handleUpdateProfile} className="p-10">
+                                <div className="grid md:grid-cols-2 gap-6 mb-8">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nombre</label>
+                                        <input
+                                            required
+                                            value={editForm.nombre}
+                                            onChange={e => setEditForm({ ...editForm, nombre: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl bg-gray-50 border border-gray-100 focus:border-fila-gold outline-none font-bold"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Primer Apellido</label>
+                                        <input
+                                            required
+                                            value={editForm.primer_apellido}
+                                            onChange={e => setEditForm({ ...editForm, primer_apellido: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl bg-gray-50 border border-gray-100 focus:border-fila-gold outline-none font-bold"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Segundo Apellido</label>
+                                        <input
+                                            value={editForm.segundo_apellido}
+                                            onChange={e => setEditForm({ ...editForm, segundo_apellido: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl bg-gray-50 border border-gray-100 focus:border-fila-gold outline-none font-bold"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Teléfono</label>
+                                        <input
+                                            value={editForm.telefono}
+                                            onChange={e => setEditForm({ ...editForm, telefono: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl bg-gray-50 border border-gray-100 focus:border-fila-gold outline-none font-bold"
+                                        />
+                                    </div>
+                                    <div className="space-y-1.5 md:col-span-2">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Fecha de Nacimiento</label>
+                                        <input
+                                            type="date"
+                                            value={editForm.fecha_nacimiento}
+                                            onChange={e => setEditForm({ ...editForm, fecha_nacimiento: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl bg-gray-50 border border-gray-100 focus:border-fila-gold outline-none font-bold"
+                                        />
+                                    </div>
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    disabled={updateStatus === 'loading'}
+                                    className={`w-full py-4 rounded-2xl font-black transition-all shadow-xl flex items-center justify-center gap-2 text-sm tracking-widest uppercase ${updateStatus === 'success' ? 'bg-green-500 text-white' :
+                                        updateStatus === 'error' ? 'bg-red-500 text-white' :
+                                            'bg-fila-dark text-white hover:bg-black shadow-fila-dark/20'
+                                        }`}
+                                >
+                                    {updateStatus === 'loading' ? <Loader2 size={18} className="animate-spin" /> :
+                                        updateStatus === 'success' ? <CheckCircle2 size={18} /> :
+                                            updateStatus === 'error' ? <AlertCircle size={18} /> :
+                                                <Euro size={18} />}
+                                    {updateStatus === 'success' ? 'PERFIL ACTUALIZADO' :
+                                        updateStatus === 'error' ? 'ERROR EN ACTUALIZACIÓN' :
+                                            'GUARDAR CAMBIOS'}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* Change Password Modal */}
+                {isChangingPassword && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-md rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                            <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-fila-dark text-white">
+                                <div>
+                                    <h2 className="text-xl font-black tracking-tighter uppercase leading-none mb-1">Cambiar Contraseña</h2>
+                                    <p className="text-[10px] text-white/70 font-black uppercase tracking-[0.2em]">Mejora la seguridad de tu cuenta</p>
+                                </div>
+                                <button onClick={() => setIsChangingPassword(false)} className="p-2 hover:bg-white/10 rounded-full transition-all">
+                                    <X size={24} />
+                                </button>
+                            </div>
+                            <form onSubmit={handleChangePassword} className="p-10 space-y-6">
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Nueva Contraseña</label>
+                                    <input
+                                        type="password"
+                                        required
+                                        minLength={6}
+                                        value={passwordForm.password}
+                                        onChange={e => setPasswordForm({ ...passwordForm, password: e.target.value })}
+                                        className="w-full px-5 py-3 rounded-2xl bg-gray-50 border border-gray-100 focus:border-fila-gold outline-none font-bold"
+                                        placeholder="••••••••"
+                                    />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Confirmar Contraseña</label>
+                                    <input
+                                        type="password"
+                                        required
+                                        minLength={6}
+                                        value={passwordForm.confirmPassword}
+                                        onChange={e => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                                        className="w-full px-5 py-3 rounded-2xl bg-gray-50 border border-gray-100 focus:border-fila-gold outline-none font-bold"
+                                        placeholder="••••••••"
+                                    />
+                                </div>
+
+                                <button
+                                    type="submit"
+                                    disabled={passwordStatus === 'loading'}
+                                    className={`w-full py-4 rounded-2xl font-black transition-all shadow-xl flex items-center justify-center gap-2 text-sm tracking-widest uppercase ${passwordStatus === 'success' ? 'bg-green-500 text-white' :
+                                        passwordStatus === 'error' ? 'bg-red-500 text-white' :
+                                            'bg-fila-dark text-white hover:bg-black shadow-fila-dark/20'
+                                        }`}
+                                >
+                                    {passwordStatus === 'loading' ? <Loader2 size={18} className="animate-spin" /> :
+                                        passwordStatus === 'success' ? <CheckCircle2 size={18} /> :
+                                            passwordStatus === 'error' ? <AlertCircle size={18} /> :
+                                                <Key size={18} />}
+                                    {passwordStatus === 'success' ? 'CONTRASEÑA CAMBIADA' :
+                                        passwordStatus === 'error' ? 'ERROR AL CAMBIAR' :
+                                            'ACTUALIZAR SEGURIDAD'}
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                )}
             </div>
         </main>
     );
 }
-
-const Clock = ({ size, className }: { size: number; className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <circle cx="12" cy="12" r="10" />
-        <polyline points="12 6 12 12 16 14" />
-    </svg>
-);
-
-const MapPin = ({ size, className }: { size: number; className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
-        <circle cx="12" cy="10" r="3" />
-    </svg>
-);
-
-const X = ({ size, className }: { size: number; className?: string }) => (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-        <path d="M18 6 6 18" />
-        <path d="m6 6 12 12" />
-    </svg>
-);
 

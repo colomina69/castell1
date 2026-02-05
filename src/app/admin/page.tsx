@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Shield, Search, UserPlus, Edit2, Trash2, UserCheck, Loader2, ArrowLeft, MoreVertical, X, Check, Mail, Phone, Euro, Ticket, Save, LayoutDashboard, Settings, LogOut, Calendar, Users, Info } from 'lucide-react';
+import { Shield, Search, UserPlus, Edit2, Trash2, UserCheck, Loader2, ArrowLeft, MoreVertical, X, Check, Mail, Phone, Euro, Ticket, Save, LayoutDashboard, Settings, LogOut, Calendar, Users, Info, FileText } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { AdminSidebar } from '@/components/AdminSidebar';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface Socio {
     id: string;
@@ -20,6 +22,7 @@ interface Socio {
     loteria_mensual_extra: number;
     se_queda_loteria_mensual: boolean;
     loteria_especial_extra: number;
+    grupo: string | null;
 }
 
 interface Quota {
@@ -65,6 +68,7 @@ export default function AdminDashboard() {
     const [isAdmin, setIsAdmin] = useState(false);
     const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
     const [chargingId, setChargingId] = useState<string | null>(null);
+    const [isExporting, setIsExporting] = useState(false);
     const router = useRouter();
     const pathname = usePathname();
 
@@ -104,7 +108,8 @@ export default function AdminDashboard() {
         cuota_id: '',
         loteria_mensual_extra: 0,
         se_queda_loteria_mensual: false,
-        loteria_especial_extra: 0
+        loteria_especial_extra: 0,
+        grupo: ''
     });
 
     useEffect(() => {
@@ -168,6 +173,79 @@ export default function AdminDashboard() {
             .order('fecha', { ascending: false })
             .limit(15);
         if (data) setRecentTransactions(data as any);
+    };
+
+    const exportToCSV = (data: Transaction[]) => {
+        const headers = ['Socio', 'Concepto', 'Categoría', 'Tipo', 'Monto', 'Fecha', 'Estado'];
+        const csvRows = [
+            headers.join(','),
+            ...data.map(t => [
+                `"${t.socios?.nombre} ${t.socios?.primer_apellido}"`,
+                `"${t.concepto}"`,
+                `"${t.categoria}"`,
+                `"${t.tipo}"`,
+                t.monto,
+                `"${new Date(t.fecha).toLocaleString()}"`,
+                `"${t.estado}"`
+            ].join(','))
+        ];
+
+        const csvContent = csvRows.join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `informe_financiero_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    };
+
+    const exportToPDF = (data: Transaction[]) => {
+        const doc = new jsPDF();
+
+        doc.setFontSize(20);
+        doc.text('Informe Financiero - Filà Moros del Castell', 14, 22);
+        doc.setFontSize(11);
+        doc.setTextColor(100);
+        doc.text(`Generado el: ${new Date().toLocaleString()}`, 14, 30);
+
+        const tableData = data.map(t => [
+            `${t.socios?.nombre} ${t.socios?.primer_apellido}`,
+            t.concepto,
+            t.categoria,
+            t.tipo === 'cobro' ? '-' + t.monto + '€' : '+' + t.monto + '€',
+            new Date(t.fecha).toLocaleDateString(),
+            t.estado
+        ]);
+
+        autoTable(doc, {
+            head: [['Socio', 'Concepto', 'Cat.', 'Monto', 'Fecha', 'Estado']],
+            body: tableData,
+            startY: 40,
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [184, 134, 11] } // Fila gold color-ish
+        });
+
+        doc.save(`informe_financiero_${new Date().toISOString().split('T')[0]}.pdf`);
+    };
+
+    const handleExport = async (type: 'csv' | 'pdf') => {
+        setIsExporting(true);
+        // Fetch ALL transactions for the report
+        const { data, error } = await supabase
+            .from('pagos_cobros')
+            .select('*, socios(nombre, primer_apellido)')
+            .order('fecha', { ascending: false });
+
+        if (error) {
+            alert('Error al obtener datos para el informe: ' + error.message);
+        } else if (data) {
+            if (type === 'csv') exportToCSV(data as any);
+            else exportToPDF(data as any);
+        }
+        setIsExporting(false);
     };
 
     const handleSelectEvento = async (eventoId: string) => {
@@ -236,6 +314,7 @@ export default function AdminDashboard() {
                 loteria_mensual_extra: Number(createForm.loteria_mensual_extra),
                 se_queda_loteria_mensual: createForm.se_queda_loteria_mensual,
                 loteria_especial_extra: Number(createForm.loteria_especial_extra),
+                grupo: createForm.grupo || null,
                 is_active: true
             }]);
 
@@ -252,7 +331,8 @@ export default function AdminDashboard() {
                 cuota_id: '',
                 loteria_mensual_extra: 0,
                 se_queda_loteria_mensual: false,
-                loteria_especial_extra: 0
+                loteria_especial_extra: 0,
+                grupo: ''
             });
             fetchSocios();
         } else {
@@ -278,6 +358,7 @@ export default function AdminDashboard() {
                 loteria_mensual_extra: Number(editingSocio.loteria_mensual_extra),
                 se_queda_loteria_mensual: editingSocio.se_queda_loteria_mensual,
                 loteria_especial_extra: Number(editingSocio.loteria_especial_extra),
+                grupo: editingSocio.grupo,
             })
             .eq('id', editingSocio.id);
 
@@ -720,6 +801,24 @@ export default function AdminDashboard() {
                     ) : (
                         /* Historial Movimientos Tab Content */
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            <div className="flex justify-end gap-3 mb-6">
+                                <button
+                                    onClick={() => handleExport('csv')}
+                                    disabled={isExporting}
+                                    className="px-5 py-2.5 bg-white border border-gray-200 text-fila-dark rounded-xl text-xs font-black uppercase tracking-widest hover:bg-gray-50 transition-all flex items-center gap-2 shadow-sm disabled:opacity-50"
+                                >
+                                    {isExporting ? <Loader2 size={14} className="animate-spin" /> : <Info size={14} className="text-fila-gold" />}
+                                    Exportar CSV
+                                </button>
+                                <button
+                                    onClick={() => handleExport('pdf')}
+                                    disabled={isExporting}
+                                    className="px-5 py-2.5 bg-fila-dark text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-fila-dark/90 transition-all flex items-center gap-2 shadow-lg shadow-fila-dark/10 disabled:opacity-50"
+                                >
+                                    {isExporting ? <Loader2 size={14} className="animate-spin" /> : <FileText size={14} className="text-fila-gold" />}
+                                    Descargar PDF
+                                </button>
+                            </div>
                             <div className="bg-white rounded-[32px] md:rounded-[40px] border border-gray-200 shadow-sm overflow-hidden mb-10">
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-left border-collapse text-xs md:text-sm">
@@ -828,6 +927,15 @@ export default function AdminDashboard() {
                                             placeholder="Primer Apellido..."
                                         />
                                     </div>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Grupo / Peña</label>
+                                    <input
+                                        placeholder="Ej: Escuadra, Familia..."
+                                        value={createForm.grupo}
+                                        onChange={e => setCreateForm({ ...createForm, grupo: e.target.value })}
+                                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold"
+                                    />
                                 </div>
 
                                 <div className="space-y-1.5">
@@ -1123,6 +1231,16 @@ export default function AdminDashboard() {
                                             className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold"
                                         />
                                     </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Grupo / Peña</label>
+                                    <input
+                                        placeholder="Ej: Escuadra, Familia..."
+                                        value={editingSocio.grupo || ''}
+                                        onChange={e => setEditingSocio({ ...editingSocio, grupo: e.target.value })}
+                                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold"
+                                    />
                                 </div>
 
                                 <div className="space-y-1.5">

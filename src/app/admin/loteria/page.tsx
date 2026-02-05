@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Ticket, LayoutDashboard, Euro, LogOut, MoreVertical, Calendar, Search, Users } from 'lucide-react';
+import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Ticket, LayoutDashboard, Euro, LogOut, MoreVertical, Calendar, Search, Users, Eye, Download, FileText } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { AdminSidebar } from '@/components/AdminSidebar';
@@ -24,7 +26,11 @@ export default function LoteriaAdmin() {
     const [isAdmin, setIsAdmin] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingSorteo, setEditingSorteo] = useState<Sorteo | null>(null);
+    const [viewingDetails, setViewingDetails] = useState<Sorteo | null>(null);
+    const [sociosAsignados, setSociosAsignados] = useState<any[]>([]);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
+    const [isDetailsLoading, setIsDetailsLoading] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [formData, setFormData] = useState({
         descripcion: '',
@@ -197,19 +203,127 @@ export default function LoteriaAdmin() {
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (!confirm('¿Estás seguro de que quieres eliminar este sorteo? Se eliminarán también las asignaciones asociadas.')) return;
+    const handleOpenDetails = async (sorteo: Sorteo) => {
+        setViewingDetails(sorteo);
+        setIsDetailsLoading(true);
 
-        const { error } = await supabase
-            .from('sorteos')
-            .delete()
-            .eq('id', id);
+        try {
+            // 1. Obtener asignaciones para este sorteo con datos de socios
+            const { data: asignacionesData } = await supabase
+                .from('loterias_asignadas')
+                .select('*, socios(nombre, primer_apellido, grupo)')
+                .eq('sorteo_id', sorteo.id);
 
-        if (!error) {
-            fetchSorteos();
-        } else {
-            alert('Error al eliminar el sorteo');
+            if (asignacionesData) {
+                // 2. Obtener todos los pagos/cobros de lotería para calcular los Pagados
+                const { data: recordsData } = await supabase
+                    .from('pagos_cobros')
+                    .select('socio_id, monto, tipo, estado, parent_id')
+                    .eq('categoria', 'Lotería');
+
+                // 3. Mapear y calcular saldos
+                const mappedData = asignacionesData.map(asig => {
+                    // Sumar pagos directos vinculados a esta asignación (via parent_id)
+                    // o buscando por socio_id si el parent_id no coincide (fallback)
+                    const paid = recordsData
+                        ?.filter(p => p.tipo === 'pago' && (p.parent_id === asig.pago_id || p.socio_id === asig.socio_id))
+                        .reduce((sum, p) => sum + Number(p.monto), 0) || 0;
+
+                    return {
+                        id: asig.id,
+                        socio_id: asig.socio_id,
+                        nombre: `${asig.socios.nombre} ${asig.socios.primer_apellido}`,
+                        grupo: asig.socios.grupo || 'Sin Grupo',
+                        cantidad: asig.cantidad,
+                        total_monto: asig.total_monto,
+                        pagado: paid,
+                        pendiente: asig.total_monto - paid
+                    };
+                });
+
+                setSociosAsignados(mappedData.sort((a, b) => (a.grupo || '').localeCompare(b.grupo || '')));
+            }
+        } catch (err) {
+            console.error('Error fetching details:', err);
+        } finally {
+            setIsDetailsLoading(false);
         }
+    };
+
+    const handleExport = async (format: 'csv' | 'pdf') => {
+        if (!viewingDetails || sociosAsignados.length === 0) return;
+        setIsExporting(true);
+
+        const grouped = sociosAsignados.reduce((acc: Record<string, any[]>, curr) => {
+            const groupName = curr.grupo;
+            if (!acc[groupName]) acc[groupName] = [];
+            acc[groupName].push(curr);
+            return acc;
+        }, {});
+
+        if (format === 'csv') {
+            const dataToExport = Object.values(grouped).flat().map(s => [
+                `"${s.nombre}"`,
+                `"${s.grupo}"`,
+                s.cantidad,
+                `${s.total_monto.toFixed(2)}€`,
+                `${s.pagado.toFixed(2)}€`,
+                `${s.pendiente.toFixed(2)}€`
+            ]);
+
+            const headers = ['Socio', 'Grupo', 'Décimos', 'Total Asignado', 'Pagado', 'Pendiente'].join(',');
+            const csv = [headers, ...dataToExport.map(r => r.join(','))].join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute('download', `loteria_${viewingDetails.descripcion.replace(/\s+/g, '_')}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else {
+            const doc = new jsPDF();
+            doc.setFontSize(18);
+            doc.text(`Reporte Lotería: ${viewingDetails.descripcion}`, 14, 20);
+            doc.setFontSize(10);
+            doc.text(`Total recaudado: ${sociosAsignados.reduce((acc, s) => acc + s.pagado, 0).toFixed(2)}€`, 14, 28);
+            doc.text(`Total pendiente: ${sociosAsignados.reduce((acc, s) => acc + s.pendiente, 0).toFixed(2)}€`, 14, 34);
+
+            const tableRows: any[] = [];
+            Object.entries(grouped).forEach(([groupName, groupSocios]) => {
+                const groupTotal = groupSocios.reduce((acc, s) => acc + s.total_monto, 0);
+                const groupPaid = groupSocios.reduce((acc, s) => acc + s.pagado, 0);
+
+                tableRows.push([
+                    {
+                        content: `${groupName.toUpperCase()} (Total: ${groupTotal.toFixed(2)}€ | Pagado: ${groupPaid.toFixed(2)}€)`,
+                        colSpan: 4,
+                        styles: { fillColor: [248, 250, 252], textColor: [180, 150, 80], fontStyle: 'bold', fontSize: 8 }
+                    }
+                ]);
+
+                groupSocios.forEach(s => {
+                    tableRows.push([
+                        s.nombre,
+                        s.cantidad,
+                        `${s.pagado.toFixed(2)}€`,
+                        `${s.pendiente.toFixed(2)}€`
+                    ]);
+                });
+            });
+
+            autoTable(doc, {
+                head: [['Socio', 'Décimos', 'Pagado', 'Pendiente']],
+                body: tableRows,
+                startY: 40,
+                theme: 'striped',
+                headStyles: { fillColor: [30, 41, 59] },
+                styles: { fontSize: 9 }
+            });
+
+            doc.save(`loteria_${viewingDetails.descripcion.replace(/\s+/g, '_')}.pdf`);
+        }
+        setIsExporting(false);
     };
 
     if (!isAdmin || (loading && sorteos.length === 0)) {
@@ -290,6 +404,13 @@ export default function LoteriaAdmin() {
                                         </span>
                                     </div>
                                     <div className="flex gap-1 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                            onClick={() => handleOpenDetails(sorteo)}
+                                            className="p-2 text-gray-400 hover:text-fila-gold hover:bg-fila-gold/10 rounded-lg transition-all"
+                                            title="Ver detalles"
+                                        >
+                                            <Eye size={16} />
+                                        </button>
                                         <button
                                             onClick={() => handleOpenModal(sorteo)}
                                             className="p-2 text-gray-400 hover:text-fila-gold hover:bg-fila-gold/10 rounded-lg transition-all"
@@ -456,6 +577,139 @@ export default function LoteriaAdmin() {
                                     </button>
                                 </div>
                             </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* View Details Modal */}
+                {viewingDetails && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 max-h-[80vh] flex flex-col">
+                            <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-fila-light text-fila-dark">
+                                <div>
+                                    <h2 className="text-xl font-black tracking-tighter uppercase leading-none mb-1">Detalles de Asignación</h2>
+                                    <p className="text-[10px] text-fila-gold font-black uppercase tracking-[0.2em]">{viewingDetails.descripcion}</p>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2 bg-fila-dark/5 px-4 py-2 rounded-xl">
+                                        <Download size={16} className="text-fila-gold" />
+                                        <button
+                                            onClick={() => handleExport('csv')}
+                                            disabled={isExporting || sociosAsignados.length === 0}
+                                            className="text-[10px] font-black uppercase tracking-widest hover:text-fila-gold transition-colors disabled:opacity-50"
+                                        >
+                                            CSV
+                                        </button>
+                                        <div className="w-px h-3 bg-fila-dark/10 mx-1" />
+                                        <button
+                                            onClick={() => handleExport('pdf')}
+                                            disabled={isExporting || sociosAsignados.length === 0}
+                                            className="text-[10px] font-black uppercase tracking-widest hover:text-fila-gold transition-colors disabled:opacity-50"
+                                        >
+                                            PDF
+                                        </button>
+                                        {isExporting && <Loader2 size={12} className="animate-spin text-fila-gold ml-1" />}
+                                    </div>
+                                    <button onClick={() => setViewingDetails(null)} className="p-2 hover:bg-fila-dark/10 rounded-full transition-all">
+                                        <X size={24} />
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="bg-fila-light/30 p-8 border-b border-gray-100">
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
+                                        <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Total Asignado</p>
+                                        <p className="text-xl font-black text-fila-dark">
+                                            {sociosAsignados.reduce((acc, s) => acc + s.total_monto, 0).toFixed(2)}€
+                                        </p>
+                                    </div>
+                                    <div className="bg-green-50 p-4 rounded-3xl shadow-sm border border-green-100">
+                                        <p className="text-[9px] font-black text-green-600/60 uppercase tracking-widest mb-1">Total Cobrado</p>
+                                        <p className="text-xl font-black text-green-600">
+                                            {sociosAsignados.reduce((acc, s) => acc + s.pagado, 0).toFixed(2)}€
+                                        </p>
+                                    </div>
+                                    <div className="bg-orange-50 p-4 rounded-3xl shadow-sm border border-orange-100">
+                                        <p className="text-[9px] font-black text-orange-600/60 uppercase tracking-widest mb-1">Total Pendiente</p>
+                                        <p className="text-xl font-black text-orange-600">
+                                            {sociosAsignados.reduce((acc, s) => acc + s.pendiente, 0).toFixed(2)}€
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="p-10 overflow-y-auto flex-1">
+                                {isDetailsLoading ? (
+                                    <div className="flex flex-col items-center justify-center py-20">
+                                        <Loader2 className="w-10 h-10 text-fila-gold animate-spin mb-4" />
+                                        <p className="text-gray-400 font-bold">Cargando asignaciones...</p>
+                                    </div>
+                                ) : sociosAsignados.length === 0 ? (
+                                    <div className="text-center py-20 bg-gray-50 rounded-[32px] border-2 border-dashed border-gray-200">
+                                        <Ticket className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                                        <p className="text-gray-400 font-bold">Sin asignaciones registradas</p>
+                                    </div>
+                                ) : (
+                                    <table className="w-full">
+                                        <thead>
+                                            <tr className="text-left">
+                                                <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Socio</th>
+                                                <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Décimos</th>
+                                                <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Pagado</th>
+                                                <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Pendiente</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-50">
+                                            {(() => {
+                                                const grouped = sociosAsignados.reduce((acc: Record<string, any[]>, curr) => {
+                                                    const groupName = curr.grupo;
+                                                    if (!acc[groupName]) acc[groupName] = [];
+                                                    acc[groupName].push(curr);
+                                                    return acc;
+                                                }, {});
+
+                                                return Object.entries(grouped).map(([groupName, groupSocios]) => {
+                                                    const totalPersonas = groupSocios.length;
+                                                    const totalAmount = groupSocios.reduce((acc, s) => acc + s.total_monto, 0);
+                                                    return (
+                                                        <div key={groupName} className="contents">
+                                                            <tr className="bg-gray-50/50">
+                                                                <td colSpan={4} className="px-4 py-2 flex justify-between items-center border-y border-gray-100">
+                                                                    <span className="text-[8px] font-black text-fila-gold uppercase tracking-[0.3em]">
+                                                                        {groupName}
+                                                                    </span>
+                                                                    <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">
+                                                                        {totalPersonas} {totalPersonas === 1 ? 'socio' : 'socios'} • {totalAmount.toFixed(2)}€
+                                                                    </span>
+                                                                </td>
+                                                            </tr>
+                                                            {groupSocios.map((s) => (
+                                                                <tr key={s.id} className="group hover:bg-gray-50/20 transition-colors">
+                                                                    <td className="py-4 pl-4 font-bold text-fila-dark truncate max-w-[200px]">
+                                                                        {s.nombre}
+                                                                    </td>
+                                                                    <td className="py-4 text-center">
+                                                                        <span className="px-2 py-1 bg-gray-100 rounded-lg text-[10px] font-black text-gray-500">
+                                                                            {s.cantidad}
+                                                                        </span>
+                                                                    </td>
+                                                                    <td className="py-4 text-right text-sm font-black text-green-600">
+                                                                        {s.pagado > 0 ? `${s.pagado.toFixed(2)}€` : '-'}
+                                                                    </td>
+                                                                    <td className="py-4 pr-4 text-right text-sm font-black text-orange-600">
+                                                                        {s.pendiente > 0 ? `${s.pendiente.toFixed(2)}€` : 'Liquidado'}
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </div>
+                                                    );
+                                                });
+                                            })()}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </div>
                         </div>
                     </div>
                 )}

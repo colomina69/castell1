@@ -18,8 +18,12 @@ import {
     Search,
     Plus,
     Info,
-    History
+    History,
+    FileText,
+    Download
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { AdminSidebar } from '@/components/AdminSidebar';
@@ -30,6 +34,13 @@ interface Evento {
     fecha: string;
     precio_socio: number;
     precio_invitado: number;
+}
+
+interface Cuota {
+    id: string;
+    nombre: string;
+    monto: number;
+    descripcion?: string;
 }
 
 interface Inscripcion {
@@ -58,6 +69,8 @@ export default function CobrosAdmin() {
     const [selectedEvento, setSelectedEvento] = useState<Evento | null>(null);
     const [sorteos, setSorteos] = useState<any[]>([]);
     const [selectedSorteo, setSelectedSorteo] = useState<any | null>(null);
+    const [cuotas, setCuotas] = useState<Cuota[]>([]);
+    const [selectedCuota, setSelectedCuota] = useState<Cuota | null>(null);
     const [inscripciones, setInscripciones] = useState<Inscripcion[]>([]);
     const [socios, setSocios] = useState<any[]>([]);
     const [loterias, setLoterias] = useState<any[]>([]);
@@ -68,6 +81,7 @@ export default function CobrosAdmin() {
     const [processingId, setProcessingId] = useState<string | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [showSettled, setShowSettled] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
 
     // Partial payment modal
     const [payingSocio, setPayingSocio] = useState<any | null>(null);
@@ -124,6 +138,12 @@ export default function CobrosAdmin() {
             .eq('is_active', true)
             .order('primer_apellido', { ascending: true });
         if (sData) setSocios(sData);
+
+        const { data: cuData } = await supabase
+            .from('cuotas')
+            .select('*')
+            .order('nombre', { ascending: true });
+        if (cuData) setCuotas(cuData);
 
         setLoading(false);
     };
@@ -216,7 +236,7 @@ export default function CobrosAdmin() {
         } else if (activeTab === 'eventos' && selectedEvento) {
             handleSelectEvento(selectedEvento);
         }
-    }, [activeTab]);
+    }, [activeTab, selectedEvento, selectedSorteo, selectedCuota]); // Added selectedCuota to dependencies
 
     const handleChargeEvent = async (ins: Inscripcion) => {
         if (!selectedEvento) return;
@@ -317,7 +337,7 @@ export default function CobrosAdmin() {
     };
 
     const handleChargeQuota = async (socio: any) => {
-        if (!socio.cuotas) return;
+        if (!selectedCuota) return; // Ensure a cuota type is selected
         setProcessingId(socio.id);
 
         const { data, error } = await supabase
@@ -325,8 +345,8 @@ export default function CobrosAdmin() {
             .insert([{
                 socio_id: socio.id,
                 tipo: 'cobro',
-                monto: socio.cuotas.monto,
-                concepto: `Cuota Anual 2026: ${socio.cuotas.nombre}`,
+                monto: selectedCuota.monto,
+                concepto: `Cuota Anual ${new Date().getFullYear()}: ${selectedCuota.nombre}`, // Use selectedCuota
                 categoria: 'Cuota',
                 estado: 'pendiente'
             }])
@@ -338,13 +358,15 @@ export default function CobrosAdmin() {
                 ...cargosData,
                 [socio.id]: {
                     id: data.id,
-                    monto: socio.cuotas.monto,
+                    monto: selectedCuota.monto,
                     pagado: 0,
                     estado: 'pendiente',
                     is_automatic: false,
                     concepto: data.concepto
                 }
             });
+        } else if (error) {
+            alert('Error al generar el cobro de cuota: ' + error.message);
         }
         setProcessingId(null);
     };
@@ -414,7 +436,87 @@ export default function CobrosAdmin() {
         setProcessingId(null);
     };
 
-    if (!isAdmin || (loading && eventos.length === 0)) {
+    const handleExport = async (format: 'csv' | 'pdf') => {
+        setIsExporting(true);
+        const dataToExport = (activeTab === 'eventos' ? filteredInscripciones : activeTab === 'cuotas' ? socios : loterias).filter(item => {
+            const name = activeTab === 'eventos' ? `${item.socios.nombre} ${item.socios.primer_apellido}` : activeTab === 'cuotas' ? `${item.nombre} ${item.primer_apellido}` : `${item.socios.nombre} ${item.socios.primer_apellido}`;
+            if (!name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+
+            const socioId = activeTab === 'eventos' ? item.socio_id : activeTab === 'cuotas' ? item.id : item.socio_id;
+            const cargo = (activeTab === 'loteria' && item.pago_id) ? cargosData[item.pago_id] : cargosData[socioId];
+
+            // Filter by cuota_id if in cuotas tab
+            if (activeTab === 'cuotas' && selectedCuota && item.cuota_id !== selectedCuota.id) {
+                return false;
+            }
+
+            if (!showSettled) {
+                const isPending = !cargo || cargo.estado !== 'completado';
+                return isPending;
+            }
+            return true;
+        }).map(item => {
+            const socioId = activeTab === 'eventos' ? item.socio_id : activeTab === 'cuotas' ? item.id : item.socio_id;
+            const cargo = (activeTab === 'loteria' && item.pago_id) ? cargosData[item.pago_id] : cargosData[socioId];
+            const name = activeTab === 'eventos' ? `${item.socios.nombre} ${item.socios.primer_apellido}` : activeTab === 'cuotas' ? `${item.nombre} ${item.primer_apellido}` : `${item.socios.nombre} ${item.socios.primer_apellido}`;
+
+            let total = 0;
+            let concepto = '';
+            if (activeTab === 'eventos' && selectedEvento) {
+                total = selectedEvento.precio_socio + (item.numero_invitados * selectedEvento.precio_invitado);
+                concepto = `Evento: ${selectedEvento.denominacion} (${item.numero_invitados} invitados)`;
+            } else if (activeTab === 'cuotas' && selectedCuota) { // Use selectedCuota
+                total = Number(selectedCuota.monto);
+                concepto = `Cuota Anual ${new Date().getFullYear()}: ${selectedCuota.nombre}`;
+            } else if (activeTab === 'loteria' && item.total_monto) {
+                total = Number(item.total_monto);
+                concepto = `Lotería: ${item.sorteos.descripcion} (Cant: ${item.cantidad})`;
+            }
+
+            return {
+                socio: name,
+                concepto: cargo?.concepto || concepto,
+                monto_total: total.toFixed(2),
+                pagado: cargo?.pagado.toFixed(2) || '0.00',
+                pendiente: (total - (cargo?.pagado || 0)).toFixed(2),
+                estado: cargo?.estado === 'completado' ? 'Liquidado' : 'Pendiente'
+            };
+        });
+
+        if (format === 'csv') {
+            const headers = Object.keys(dataToExport[0]).join(',');
+            const csv = [
+                headers,
+                ...dataToExport.map(row => Object.values(row).join(','))
+            ].join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute('download', `${activeTab}_cobros.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else if (format === 'pdf') {
+            const doc = new jsPDF();
+            const title = `Reporte de Cobros - ${activeTab === 'eventos' ? selectedEvento?.denominacion : activeTab === 'cuotas' ? selectedCuota?.nombre : selectedSorteo?.descripcion}`;
+            doc.text(title, 14, 20);
+
+            autoTable(doc, {
+                head: [Object.keys(dataToExport[0])],
+                body: dataToExport.map(row => Object.values(row)),
+                startY: 30,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [30, 41, 59] }, // fila-dark
+                alternateRowStyles: { fillColor: [241, 245, 249] } // gray-100
+            });
+
+            doc.save(`${activeTab}_cobros.pdf`);
+        }
+        setIsExporting(false);
+    };
+
+    if (!isAdmin || (loading && eventos.length === 0 && cuotas.length === 0 && sorteos.length === 0)) {
         return (
             <div className="min-h-screen flex flex-col items-center justify-center bg-fila-light">
                 <Loader2 className="w-12 h-12 text-fila-gold animate-spin mb-4" />
@@ -428,18 +530,37 @@ export default function CobrosAdmin() {
     );
 
     // Calculation of totals
-    const currentList = activeTab === 'eventos' ? filteredInscripciones : activeTab === 'cuotas' ? socios : loterias;
+    const currentList = (activeTab === 'eventos' ? filteredInscripciones : activeTab === 'cuotas' ? socios.filter(s => selectedCuota ? s.cuota_id === selectedCuota.id : true) : loterias).filter(item => {
+        const name = activeTab === 'eventos' ? `${item.socios.nombre} ${item.socios.primer_apellido}` : activeTab === 'cuotas' ? `${item.nombre} ${item.primer_apellido}` : `${item.socios.nombre} ${item.socios.primer_apellido}`;
+        if (!name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+        return true;
+    });
+
     const totals = currentList.reduce((acc, item) => {
         const socioId = activeTab === 'eventos' ? item.socio_id : activeTab === 'cuotas' ? item.id : item.socio_id;
         const cargo = (activeTab === 'loteria' && item.pago_id) ? cargosData[item.pago_id] : cargosData[socioId];
 
+        let totalItemAmount = 0;
+        if (activeTab === 'eventos' && selectedEvento) {
+            totalItemAmount = selectedEvento.precio_socio + (item.numero_invitados * selectedEvento.precio_invitado);
+        } else if (activeTab === 'cuotas' && selectedCuota) {
+            totalItemAmount = Number(selectedCuota.monto);
+        } else if (activeTab === 'loteria' && item.total_monto) {
+            totalItemAmount = Number(item.total_monto);
+        }
+
         if (cargo) {
-            acc.total += cargo.monto;
+            acc.total += totalItemAmount;
             acc.cobrado += cargo.pagado;
-            acc.pendiente += (cargo.monto - cargo.pagado);
+            acc.pendiente += (totalItemAmount - cargo.pagado);
+        } else {
+            // If no cargo exists, it's a pending debt
+            acc.total += totalItemAmount;
+            acc.pendiente += totalItemAmount;
         }
         return acc;
     }, { total: 0, cobrado: 0, pendiente: 0 });
+
 
     return (
         <main className="min-h-screen bg-[#F8F9FA] flex">
@@ -480,19 +601,27 @@ export default function CobrosAdmin() {
                 <div className="flex flex-col lg:flex-row gap-8">
                     {/* Left Sidebar: Selectors */}
                     <div className="w-full lg:w-96 shrink-0">
-                        {activeTab === 'eventos' || activeTab === 'loteria' ? (
+                        {activeTab === 'eventos' || activeTab === 'loteria' || activeTab === 'cuotas' ? (
                             <div className="space-y-4">
                                 <div className="flex items-center gap-3 px-2 mb-6">
                                     <div className="w-1.5 h-8 bg-fila-gold rounded-full"></div>
-                                    <h3 className="text-xl font-black text-fila-dark uppercase tracking-tight">Seleccionar {activeTab === 'eventos' ? 'Evento' : 'Sorteo'}</h3>
+                                    <h3 className="text-xl font-black text-fila-dark uppercase tracking-tight">
+                                        Seleccionar {activeTab === 'eventos' ? 'Evento' : activeTab === 'loteria' ? 'Sorteo' : 'Tipo de Cuota'}
+                                    </h3>
                                 </div>
                                 <div className="space-y-3">
-                                    {(activeTab === 'eventos' ? eventos : sorteos).map((item) => {
-                                        const isSelected = activeTab === 'eventos' ? selectedEvento?.id === item.id : selectedSorteo?.id === item.id;
+                                    {(activeTab === 'eventos' ? eventos : activeTab === 'loteria' ? sorteos : cuotas).map((item) => {
+                                        const isSelected = activeTab === 'eventos' ? selectedEvento?.id === item.id :
+                                            activeTab === 'loteria' ? selectedSorteo?.id === item.id :
+                                                selectedCuota?.id === item.id;
                                         return (
                                             <button
                                                 key={item.id}
-                                                onClick={() => activeTab === 'eventos' ? handleSelectEvento(item) : handleSelectSorteo(item)}
+                                                onClick={() => {
+                                                    if (activeTab === 'eventos') handleSelectEvento(item);
+                                                    else if (activeTab === 'loteria') handleSelectSorteo(item);
+                                                    else setSelectedCuota(item);
+                                                }}
                                                 className={`w-full p-6 rounded-[32px] text-left transition-all border-2 flex flex-col gap-2 ${isSelected
                                                     ? 'bg-fila-green border-fila-green shadow-xl shadow-fila-green/20 -translate-y-1'
                                                     : 'bg-white border-gray-100 hover:border-fila-gold/30 hover:bg-gray-50'
@@ -500,14 +629,18 @@ export default function CobrosAdmin() {
                                             >
                                                 <div className="flex justify-between items-start">
                                                     <span className={`text-[10px] font-black uppercase tracking-widest ${isSelected ? 'text-white/70' : 'text-fila-gold'}`}>
-                                                        {activeTab === 'eventos' ? new Date(item.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long' }) : item.numero ? `Nº ${item.numero}` : 'Extraordinario'}
+                                                        {activeTab === 'eventos' ? new Date(item.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long' }) :
+                                                            activeTab === 'loteria' ? (item.numero ? `Nº ${item.numero}` : 'Extraordinario') :
+                                                                `${item.monto}€ Anuales`}
                                                     </span>
                                                     <div className={`p-1.5 rounded-lg ${isSelected ? 'bg-white/20' : 'bg-gray-100'}`}>
-                                                        {activeTab === 'eventos' ? <Calendar size={14} className={isSelected ? 'text-white' : 'text-gray-400'} /> : <Ticket size={14} className={isSelected ? 'text-white' : 'text-gray-400'} />}
+                                                        {activeTab === 'eventos' ? <Calendar size={14} className={isSelected ? 'text-white' : 'text-gray-400'} /> :
+                                                            activeTab === 'loteria' ? <Ticket size={14} className={isSelected ? 'text-white' : 'text-gray-400'} /> :
+                                                                <Euro size={14} className={isSelected ? 'text-white' : 'text-gray-400'} />}
                                                     </div>
                                                 </div>
                                                 <h4 className={`font-black text-lg leading-tight uppercase tracking-tight ${isSelected ? 'text-white' : 'text-fila-dark'}`}>
-                                                    {activeTab === 'eventos' ? item.denominacion : item.descripcion}
+                                                    {activeTab === 'eventos' ? item.denominacion : activeTab === 'loteria' ? item.descripcion : item.nombre}
                                                 </h4>
                                             </button>
                                         );
@@ -517,13 +650,13 @@ export default function CobrosAdmin() {
                         ) : (
                             <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm text-center">
                                 <div className="w-16 h-16 bg-fila-light rounded-2xl flex items-center justify-center text-fila-gold mx-auto mb-4">
-                                    {activeTab === 'cuotas' ? <Euro size={32} /> : <Ticket size={32} />}
+                                    <Euro size={32} />
                                 </div>
                                 <h3 className="text-lg font-black text-fila-dark uppercase leading-none mb-2">
-                                    {activeTab === 'cuotas' ? 'Gestión de Cuotas' : 'Gestión de Lotería'}
+                                    Gestión de Cobros
                                 </h3>
                                 <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                                    {activeTab === 'cuotas' ? 'Liquidación de cuotas anuales' : 'Cobro de décimos asignados'}
+                                    Selecciona una categoría arriba
                                 </p>
                             </div>
                         )}
@@ -531,12 +664,12 @@ export default function CobrosAdmin() {
 
                     {/* Main Panel: List & Balance */}
                     <div className="flex-1 bg-white rounded-[40px] border border-gray-100 shadow-sm flex flex-col overflow-hidden">
-                        {(activeTab === 'eventos' && !selectedEvento) || (activeTab === 'loteria' && !selectedSorteo) ? (
+                        {(activeTab === 'eventos' && !selectedEvento) || (activeTab === 'loteria' && !selectedSorteo) || (activeTab === 'cuotas' && !selectedCuota) ? (
                             <div className="flex-1 flex flex-col items-center justify-center p-10 text-center">
                                 <div className="w-20 h-20 bg-fila-light rounded-full flex items-center justify-center text-fila-gold mb-4">
-                                    {activeTab === 'eventos' ? <Calendar size={40} /> : <Ticket size={40} />}
+                                    {activeTab === 'eventos' ? <Calendar size={40} /> : activeTab === 'cuotas' ? <Euro size={40} /> : <Ticket size={40} />}
                                 </div>
-                                <h3 className="text-xl font-black text-fila-dark uppercase">Selecciona un {activeTab === 'eventos' ? 'evento' : 'sorteo'}</h3>
+                                <h3 className="text-xl font-black text-fila-dark uppercase">Selecciona un {activeTab === 'eventos' ? 'evento' : activeTab === 'cuotas' ? 'tipo de cuota' : 'sorteo'}</h3>
                                 <p className="text-gray-400 mt-2">Para ver y gestionar los cobros correspondientes.</p>
                             </div>
                         ) : (
@@ -545,10 +678,10 @@ export default function CobrosAdmin() {
                                     <div className="flex justify-between items-start mb-6">
                                         <div>
                                             <h3 className="text-2xl font-black text-fila-dark tracking-tighter uppercase whitespace-nowrap">
-                                                {activeTab === 'eventos' ? selectedEvento?.denominacion : activeTab === 'cuotas' ? 'Cuotas Anuales 2026' : 'Lotería de Navidad'}
+                                                {activeTab === 'eventos' ? selectedEvento?.denominacion : activeTab === 'cuotas' ? selectedCuota?.nombre : selectedSorteo?.descripcion}
                                             </h3>
                                             <p className="text-xs font-bold text-fila-gold uppercase tracking-widest">
-                                                {activeTab === 'eventos' ? 'Cobros por inscripción' : activeTab === 'cuotas' ? 'Cuotas por tipo de socio' : 'Décimos por sorteo'}
+                                                {activeTab === 'eventos' ? 'Cobros por inscripción' : activeTab === 'cuotas' ? `Socios con cuota de ${selectedCuota?.monto}€` : 'Décimos por sorteo'}
                                             </p>
                                         </div>
                                     </div>
@@ -585,6 +718,24 @@ export default function CobrosAdmin() {
                                         >
                                             {showSettled ? 'Ocultar Saldados' : 'Ver Todos'}
                                         </button>
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={() => handleExport('csv')}
+                                                disabled={isExporting}
+                                                className="p-4 bg-white border border-gray-100 text-fila-gold rounded-2xl hover:bg-gray-50 transition-all shadow-sm disabled:opacity-50"
+                                                title="Exportar CSV"
+                                            >
+                                                {isExporting ? <Loader2 size={18} className="animate-spin" /> : <Download size={18} />}
+                                            </button>
+                                            <button
+                                                onClick={() => handleExport('pdf')}
+                                                disabled={isExporting}
+                                                className="p-4 bg-fila-dark text-white rounded-2xl hover:bg-fila-dark/90 transition-all shadow-lg disabled:opacity-50"
+                                                title="Descargar PDF"
+                                            >
+                                                {isExporting ? <Loader2 size={18} className="animate-spin" /> : <FileText size={18} />}
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -601,6 +752,11 @@ export default function CobrosAdmin() {
 
                                                 const socioId = activeTab === 'eventos' ? item.socio_id : activeTab === 'cuotas' ? item.id : item.socio_id;
                                                 const cargo = (activeTab === 'loteria' && item.pago_id) ? cargosData[item.pago_id] : cargosData[socioId];
+
+                                                // Filter by cuota_id if in cuotas tab
+                                                if (activeTab === 'cuotas' && selectedCuota && item.cuota_id !== selectedCuota.id) {
+                                                    return false;
+                                                }
 
                                                 // Filter by showSettled
                                                 if (!showSettled) {

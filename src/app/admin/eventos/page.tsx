@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Eye, MoreVertical, LayoutDashboard, Ticket, Euro, Calendar, Search, Users, LogOut, MapPin, Music, Flag } from 'lucide-react';
+import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Eye, MoreVertical, LayoutDashboard, Ticket, Euro, Calendar, Search, Users, LogOut, MapPin, Music, Flag, Download, FileText } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { AdminSidebar } from '@/components/AdminSidebar';
@@ -43,6 +45,7 @@ export default function AdminEventos() {
     const [editingEvento, setEditingEvento] = useState<Evento | null>(null);
     const [viewingInscripciones, setViewingInscripciones] = useState<Evento | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
+    const [isExporting, setIsExporting] = useState(false);
 
     const router = useRouter();
     const pathname = usePathname();
@@ -187,6 +190,96 @@ export default function AdminEventos() {
     const openInscripciones = (evento: Evento) => {
         setViewingInscripciones(evento);
         fetchInscripciones(evento.id);
+    };
+
+    const handleExport = async (format: 'csv' | 'pdf') => {
+        if (!viewingInscripciones || inscripciones.length === 0) return;
+        setIsExporting(true);
+
+        const grouped = inscripciones.reduce((acc: Record<string, Inscripcion[]>, curr) => {
+            const groupName = curr.grupo || 'Sin Grupo';
+            if (!acc[groupName]) acc[groupName] = [];
+            acc[groupName].push(curr);
+            return acc;
+        }, {});
+
+        if (format === 'csv') {
+            const dataToExport = Object.values(grouped).flat().map(insc => ({
+                Socio: `${insc.socios.nombre} ${insc.socios.primer_apellido}`,
+                Grupo: insc.grupo || 'Sin Grupo',
+                Invitados: insc.numero_invitados
+            }));
+
+            const headers = ['Socio', 'Grupo', 'Invitados'].join(',');
+            const csv = [
+                headers,
+                ...dataToExport.map(row => [
+                    `"${row.Socio}"`,
+                    `"${row.Grupo}"`,
+                    row.Invitados
+                ].join(','))
+            ].join('\n');
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute('download', `inscripciones_${viewingInscripciones.denominacion.replace(/\s+/g, '_')}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else {
+            const doc = new jsPDF();
+            doc.setFontSize(18);
+            doc.text(`Inscripciones: ${viewingInscripciones.denominacion}`, 14, 20);
+            doc.setFontSize(10);
+            doc.text(`Fecha del evento: ${new Date(viewingInscripciones.fecha).toLocaleDateString()}`, 14, 28);
+            doc.text(`Total personas: ${inscripciones.reduce((acc, curr) => acc + 1 + curr.numero_invitados, 0)}`, 14, 34);
+
+            const tableRows: any[] = [];
+            Object.entries(grouped).forEach(([groupName, groupInscs]) => {
+                const groupTotal = groupInscs.reduce((sum, insc) => sum + 1 + (insc.numero_invitados || 0), 0);
+
+                // Add group header row
+                tableRows.push([
+                    {
+                        content: `${groupName.toUpperCase()} (${groupTotal} ${groupTotal === 1 ? 'persona' : 'personas'})`,
+                        colSpan: 3,
+                        styles: {
+                            fillColor: [248, 250, 252],
+                            textColor: [180, 150, 80],
+                            fontStyle: 'bold',
+                            fontSize: 8,
+                            halign: 'left'
+                        }
+                    }
+                ]);
+                // Add socio rows
+                groupInscs.forEach(insc => {
+                    tableRows.push([
+                        `${insc.socios.nombre} ${insc.socios.primer_apellido}`,
+                        groupName,
+                        insc.numero_invitados
+                    ]);
+                });
+            });
+
+            autoTable(doc, {
+                head: [['Socio', 'Grupo', 'Invitados']],
+                body: tableRows,
+                startY: 40,
+                theme: 'striped',
+                headStyles: { fillColor: [30, 41, 59] }, // fila-dark
+                styles: { fontSize: 9 },
+                didParseCell: (data) => {
+                    if (data.row.raw && (data.row.raw as any)[0]?.colSpan === 3) {
+                        data.cell.styles.fontStyle = 'bold';
+                    }
+                }
+            });
+
+            doc.save(`inscripciones_${viewingInscripciones.denominacion.replace(/\s+/g, '_')}.pdf`);
+        }
+        setIsExporting(false);
     };
 
     if (!isAdmin || (loading && eventos.length === 0)) {
@@ -472,9 +565,30 @@ export default function AdminEventos() {
                                     <h2 className="text-xl font-black tracking-tighter uppercase leading-none mb-1">Inscripciones</h2>
                                     <p className="text-[10px] text-fila-gold font-black uppercase tracking-[0.2em]">{viewingInscripciones.denominacion}</p>
                                 </div>
-                                <button onClick={() => setViewingInscripciones(null)} className="p-2 hover:bg-fila-dark/10 rounded-full transition-all">
-                                    <X size={24} />
-                                </button>
+                                <div className="flex items-center gap-4">
+                                    <div className="flex items-center gap-2 bg-fila-dark/5 px-4 py-2 rounded-xl">
+                                        <Download size={16} className="text-fila-gold" />
+                                        <button
+                                            onClick={() => handleExport('csv')}
+                                            disabled={isExporting || inscripciones.length === 0}
+                                            className="text-[10px] font-black uppercase tracking-widest hover:text-fila-gold transition-colors disabled:opacity-50"
+                                        >
+                                            CSV
+                                        </button>
+                                        <div className="w-px h-3 bg-fila-dark/10 mx-1" />
+                                        <button
+                                            onClick={() => handleExport('pdf')}
+                                            disabled={isExporting || inscripciones.length === 0}
+                                            className="text-[10px] font-black uppercase tracking-widest hover:text-fila-gold transition-colors disabled:opacity-50"
+                                        >
+                                            PDF
+                                        </button>
+                                        {isExporting && <Loader2 size={12} className="animate-spin text-fila-gold ml-1" />}
+                                    </div>
+                                    <button onClick={() => setViewingInscripciones(null)} className="p-2 hover:bg-fila-dark/10 rounded-full transition-all">
+                                        <X size={24} />
+                                    </button>
+                                </div>
                             </div>
                             <div className="p-10 overflow-y-auto flex-1">
                                 {inscripciones.length === 0 ? (
@@ -487,24 +601,48 @@ export default function AdminEventos() {
                                         <thead>
                                             <tr className="text-left">
                                                 <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Socio</th>
-                                                <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Grupo</th>
                                                 <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Invitados</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-50">
-                                            {inscripciones.map((insc) => (
-                                                <tr key={insc.id} className="group">
-                                                    <td className="py-4 font-bold text-fila-dark truncate max-w-[200px]">
-                                                        {insc.socios.nombre} {insc.socios.primer_apellido}
-                                                    </td>
-                                                    <td className="py-4 text-sm text-gray-500 font-medium">{insc.grupo || '-'}</td>
-                                                    <td className="py-4 text-center">
-                                                        <span className={`px-3 py-1 rounded-lg text-xs font-black ${insc.numero_invitados > 0 ? 'bg-fila-gold/10 text-fila-gold' : 'bg-gray-100 text-gray-400'}`}>
-                                                            {insc.numero_invitados}
-                                                        </span>
-                                                    </td>
-                                                </tr>
-                                            ))}
+                                            {(() => {
+                                                const grouped = inscripciones.reduce((acc: Record<string, Inscripcion[]>, curr) => {
+                                                    const groupName = curr.grupo || 'Sin Grupo';
+                                                    if (!acc[groupName]) acc[groupName] = [];
+                                                    acc[groupName].push(curr);
+                                                    return acc;
+                                                }, {});
+
+                                                return Object.entries(grouped).map(([groupName, groupInscs]) => {
+                                                    const groupTotal = groupInscs.reduce((sum, insc) => sum + 1 + (insc.numero_invitados || 0), 0);
+                                                    return (
+                                                        <div key={groupName} className="contents">
+                                                            <tr className="bg-fila-light/30">
+                                                                <td colSpan={2} className="px-4 py-2 flex justify-between items-center bg-gray-50/50 border-y border-gray-100/50">
+                                                                    <span className="text-[8px] font-black text-fila-gold uppercase tracking-[0.3em]">
+                                                                        {groupName}
+                                                                    </span>
+                                                                    <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">
+                                                                        {groupTotal} {groupTotal === 1 ? 'persona' : 'personas'}
+                                                                    </span>
+                                                                </td>
+                                                            </tr>
+                                                            {groupInscs.map((insc) => (
+                                                                <tr key={insc.id} className="group hover:bg-gray-50/50 transition-colors">
+                                                                    <td className="py-4 pl-4 font-bold text-fila-dark truncate max-w-[200px]">
+                                                                        {insc.socios.nombre} {insc.socios.primer_apellido}
+                                                                    </td>
+                                                                    <td className="py-4 text-center pr-4">
+                                                                        <span className={`px-3 py-1 rounded-lg text-xs font-black ${insc.numero_invitados > 0 ? 'bg-fila-gold/10 text-fila-gold' : 'bg-gray-100 text-gray-400'}`}>
+                                                                            {insc.numero_invitados}
+                                                                        </span>
+                                                                    </td>
+                                                                </tr>
+                                                            ))}
+                                                        </div>
+                                                    );
+                                                });
+                                            })()}
                                         </tbody>
                                     </table>
                                 )}
