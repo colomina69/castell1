@@ -561,6 +561,16 @@ export default function CobrosAdmin() {
         return acc;
     }, { total: 0, cobrado: 0, pendiente: 0 });
 
+    // Global totals for all Cuotas (regardless of selected type)
+    const globalFeesTotals = activeTab === 'cuotas' ? socios.reduce((acc, s) => {
+        const monto = Number(s.cuotas?.monto || 0);
+        const cargo = cargosData[s.id];
+        acc.total += monto;
+        acc.cobrado += cargo?.pagado || 0;
+        acc.pendiente += (monto - (cargo?.pagado || 0));
+        return acc;
+    }, { total: 0, cobrado: 0, pendiente: 0 }) : null;
+
 
     return (
         <main className="min-h-screen bg-[#F8F9FA] flex">
@@ -685,6 +695,26 @@ export default function CobrosAdmin() {
                                             </p>
                                         </div>
                                     </div>
+
+                                    {activeTab === 'cuotas' && globalFeesTotals && (
+                                        <div className="mb-6 p-4 bg-fila-dark rounded-3xl border border-white/10 shadow-lg">
+                                            <p className="text-[9px] font-black text-white/40 uppercase tracking-[0.3em] mb-3 text-center">Resumen de Cuotas Anuales (Presupuesto Global)</p>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                <div className="text-center">
+                                                    <p className="text-[8px] font-bold text-white/30 uppercase mb-1">Total Previsto</p>
+                                                    <p className="text-sm font-black text-white">{globalFeesTotals.total.toFixed(2)}€</p>
+                                                </div>
+                                                <div className="text-center border-x border-white/5">
+                                                    <p className="text-[8px] font-bold text-white/30 uppercase mb-1">Recaudado</p>
+                                                    <p className="text-sm font-black text-green-400">{globalFeesTotals.cobrado.toFixed(2)}€</p>
+                                                </div>
+                                                <div className="text-center">
+                                                    <p className="text-[8px] font-bold text-white/30 uppercase mb-1">Pendiente</p>
+                                                    <p className="text-sm font-black text-orange-400">{globalFeesTotals.pendiente.toFixed(2)}€</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
 
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
                                         <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-center">

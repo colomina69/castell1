@@ -226,7 +226,7 @@ export default function LoteriaAdmin() {
             // 1. Obtener asignaciones para este sorteo con datos de socios
             const { data: asignacionesData } = await supabase
                 .from('loterias_asignadas')
-                .select('*, socios(nombre, primer_apellido, grupo)')
+                .select('*, socios(nombre, primer_apellido)')
                 .eq('sorteo_id', sorteo.id);
 
             if (asignacionesData) {
@@ -239,24 +239,24 @@ export default function LoteriaAdmin() {
                 // 3. Mapear y calcular saldos
                 const mappedData = asignacionesData.map(asig => {
                     // Sumar pagos directos vinculados a esta asignación (via parent_id)
-                    // o buscando por socio_id si el parent_id no coincide (fallback)
+                    // Solo filtramos por parent_id === asig.pago_id para asegurar que
+                    // corresponden a este sorteo específico.
                     const paid = recordsData
-                        ?.filter(p => p.tipo === 'pago' && (p.parent_id === asig.pago_id || p.socio_id === asig.socio_id))
+                        ?.filter(p => p.tipo === 'pago' && p.parent_id === asig.pago_id)
                         .reduce((sum, p) => sum + Number(p.monto), 0) || 0;
 
                     return {
                         id: asig.id,
                         socio_id: asig.socio_id,
                         nombre: `${asig.socios.nombre} ${asig.socios.primer_apellido}`,
-                        grupo: asig.socios.grupo || 'Sin Grupo',
                         cantidad: asig.cantidad,
                         total_monto: asig.total_monto,
                         pagado: paid,
-                        pendiente: asig.total_monto - paid
+                        pendiente: Math.max(0, asig.total_monto - paid)
                     };
                 });
 
-                setSociosAsignados(mappedData.sort((a, b) => (a.grupo || '').localeCompare(b.grupo || '')));
+                setSociosAsignados(mappedData.sort((a, b) => a.nombre.localeCompare(b.nombre)));
             }
         } catch (err) {
             console.error('Error fetching details:', err);
@@ -269,24 +269,16 @@ export default function LoteriaAdmin() {
         if (!viewingDetails || sociosAsignados.length === 0) return;
         setIsExporting(true);
 
-        const grouped = sociosAsignados.reduce((acc: Record<string, any[]>, curr) => {
-            const groupName = curr.grupo;
-            if (!acc[groupName]) acc[groupName] = [];
-            acc[groupName].push(curr);
-            return acc;
-        }, {});
-
         if (format === 'csv') {
-            const dataToExport = Object.values(grouped).flat().map(s => [
+            const dataToExport = sociosAsignados.map(s => [
                 `"${s.nombre}"`,
-                `"${s.grupo}"`,
                 s.cantidad,
                 `${s.total_monto.toFixed(2)}€`,
                 `${s.pagado.toFixed(2)}€`,
                 `${s.pendiente.toFixed(2)}€`
             ]);
 
-            const headers = ['Socio', 'Grupo', 'Décimos', 'Total Asignado', 'Pagado', 'Pendiente'].join(',');
+            const headers = ['Socio', 'Décimos', 'Total Asignado', 'Pagado', 'Pendiente'].join(',');
             const csv = [headers, ...dataToExport.map(r => r.join(','))].join('\n');
 
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -304,28 +296,12 @@ export default function LoteriaAdmin() {
             doc.text(`Total recaudado: ${sociosAsignados.reduce((acc, s) => acc + s.pagado, 0).toFixed(2)}€`, 14, 28);
             doc.text(`Total pendiente: ${sociosAsignados.reduce((acc, s) => acc + s.pendiente, 0).toFixed(2)}€`, 14, 34);
 
-            const tableRows: any[] = [];
-            Object.entries(grouped).forEach(([groupName, groupSocios]) => {
-                const groupTotal = groupSocios.reduce((acc, s) => acc + s.total_monto, 0);
-                const groupPaid = groupSocios.reduce((acc, s) => acc + s.pagado, 0);
-
-                tableRows.push([
-                    {
-                        content: `${groupName.toUpperCase()} (Total: ${groupTotal.toFixed(2)}€ | Pagado: ${groupPaid.toFixed(2)}€)`,
-                        colSpan: 4,
-                        styles: { fillColor: [248, 250, 252], textColor: [180, 150, 80], fontStyle: 'bold', fontSize: 8 }
-                    }
-                ]);
-
-                groupSocios.forEach(s => {
-                    tableRows.push([
-                        s.nombre,
-                        s.cantidad,
-                        `${s.pagado.toFixed(2)}€`,
-                        `${s.pendiente.toFixed(2)}€`
-                    ]);
-                });
-            });
+            const tableRows = sociosAsignados.map(s => [
+                s.nombre,
+                s.cantidad,
+                `${s.pagado.toFixed(2)}€`,
+                `${s.pendiente.toFixed(2)}€`
+            ]);
 
             autoTable(doc, {
                 head: [['Socio', 'Décimos', 'Pagado', 'Pendiente']],
@@ -676,51 +652,24 @@ export default function LoteriaAdmin() {
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-50">
-                                            {(() => {
-                                                const grouped = sociosAsignados.reduce((acc: Record<string, any[]>, curr) => {
-                                                    const groupName = curr.grupo;
-                                                    if (!acc[groupName]) acc[groupName] = [];
-                                                    acc[groupName].push(curr);
-                                                    return acc;
-                                                }, {});
-
-                                                return Object.entries(grouped).map(([groupName, groupSocios]) => {
-                                                    const totalPersonas = groupSocios.length;
-                                                    const totalAmount = groupSocios.reduce((acc, s) => acc + s.total_monto, 0);
-                                                    return (
-                                                        <div key={groupName} className="contents">
-                                                            <tr className="bg-gray-50/50">
-                                                                <td colSpan={4} className="px-4 py-2 flex justify-between items-center border-y border-gray-100">
-                                                                    <span className="text-[8px] font-black text-fila-gold uppercase tracking-[0.3em]">
-                                                                        {groupName}
-                                                                    </span>
-                                                                    <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">
-                                                                        {totalPersonas} {totalPersonas === 1 ? 'socio' : 'socios'} • {totalAmount.toFixed(2)}€
-                                                                    </span>
-                                                                </td>
-                                                            </tr>
-                                                            {groupSocios.map((s) => (
-                                                                <tr key={s.id} className="group hover:bg-gray-50/20 transition-colors">
-                                                                    <td className="py-4 pl-4 font-bold text-fila-dark truncate max-w-[200px]">
-                                                                        {s.nombre}
-                                                                    </td>
-                                                                    <td className="py-4 text-center">
-                                                                        <span className="px-2 py-1 bg-gray-100 rounded-lg text-[10px] font-black text-gray-500">
-                                                                            {s.cantidad}
-                                                                        </span>
-                                                                    </td>
-                                                                    <td className="py-4 text-right text-sm font-black text-green-600">
-                                                                        {s.pagado > 0 ? `${s.pagado.toFixed(2)}€` : '-'}
-                                                                    </td>
-                                                                    <td className="py-4 pr-4 text-right text-sm font-black text-orange-600">
-                                                                        {s.pendiente > 0 ? `${s.pendiente.toFixed(2)}€` : 'Liquidado'}
-                                                                    </td>
-                                                                </tr>
-                                                            ))}
-                                                        </div>
-                                                    );
-                                                });
-                                            })()}
+                                            {sociosAsignados.map((s) => (
+                                                <tr key={s.id} className="group hover:bg-gray-50/20 transition-colors">
+                                                    <td className="py-4 pl-4 font-bold text-fila-dark truncate max-w-[200px]">
+                                                        {s.nombre}
+                                                    </td>
+                                                    <td className="py-4 text-center">
+                                                        <span className="px-2 py-1 bg-gray-100 rounded-lg text-[10px] font-black text-gray-500">
+                                                            {s.cantidad}
+                                                        </span>
+                                                    </td>
+                                                    <td className="py-4 text-right text-sm font-black text-green-600">
+                                                        {s.pagado > 0 ? `${s.pagado.toFixed(2)}€` : '-'}
+                                                    </td>
+                                                    <td className="py-4 pr-4 text-right text-sm font-black text-orange-600">
+                                                        {s.pendiente > 0 ? `${s.pendiente.toFixed(2)}€` : 'Liquidado'}
+                                                    </td>
+                                                </tr>
+                                            ))}
                                         </tbody>
                                     </table>
                                 )}
