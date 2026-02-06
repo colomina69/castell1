@@ -111,6 +111,7 @@ export function AdminSidebar({ isMenuOpen, setIsMenuOpen }: AdminSidebarProps) {
                         <NavItem href="/admin/cuotas" icon={Euro} label="Configurar Cuotas" />
                         <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
                         <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
+                        <NavItem href="/admin/banco" icon={Euro} label="Punteo Bancario" />
                     </nav>
 
                     {/* User Profile Section - Now integrated below the menu */}

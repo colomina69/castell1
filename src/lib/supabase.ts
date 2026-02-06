@@ -11,3 +11,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
         storageKey: 'castell-auth-token' // Usar una clave específica para evitar colisiones
     }
 });
+// Para Server Actions (SSR/Server side)
+export const createServerClient = () => {
+    return createClient(supabaseUrl, supabaseAnonKey);
+};

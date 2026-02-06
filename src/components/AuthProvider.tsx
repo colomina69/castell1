@@ -10,24 +10,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
             if (event === 'SIGNED_OUT') {
-                // Limpiar cualquier estado local si es necesario
                 router.refresh();
             } else if (event === 'TOKEN_REFRESHED') {
                 console.log('Sesión actualizada correctamente');
             }
-
-            // Manejo específico de errores de refresh token que dispara Supabase internamente
-            // Si no hay sesión pero hay un error de auth persistente en la consola,
-            // podemos forzar un sign out para limpiar el storage.
         });
 
-        // Verificación inicial silenciosa
+        // Verificación inicial silenciosa y manejo de errores de refresh
         const checkSession = async () => {
-            const { error } = await supabase.auth.getSession();
-            if (error && error.message.includes('Refresh Token')) {
-                console.warn('Refresh Token inválido detectado, limpiando sesión...');
-                await supabase.auth.signOut();
-                router.push('/login');
+            try {
+                const { error } = await supabase.auth.getSession();
+
+                // Si hay un error de refresh token (Token Not Found o similar)
+                if (error && (
+                    error.message.includes('Refresh Token') ||
+                    error.message.includes('not found') ||
+                    (error as any).status === 400
+                )) {
+                    console.warn('Error de autenticación detectado, limpiando sesión...', error.message);
+
+                    // Limpieza agresiva del storage local por si acaso
+                    localStorage.removeItem('castell-auth-token');
+                    await supabase.auth.signOut();
+
+                    router.push('/login');
+                    router.refresh();
+                }
+            } catch (err) {
+                console.error('Error crítico comprobando sesión:', err);
             }
         };
 
