@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Shield } from '@/components/Shield';
-import { User, Mail, Phone, Calendar, LogOut, Loader2, Award, ShieldCheck, Euro, FileText, Edit2, Key, CheckCircle2, X, AlertCircle, Clock, MapPin } from 'lucide-react';
+import { User, Mail, Phone, Calendar, LogOut, Loader2, Award, ShieldCheck, Euro, FileText, Edit2, Key, CheckCircle2, X, AlertCircle, Clock, MapPin, Users, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { Navbar } from '@/components/Navbar';
 import { useRouter } from 'next/navigation';
@@ -54,6 +54,17 @@ interface Inscripcion {
     evento_id: string;
 }
 
+interface InscritoInfo {
+    id: string;
+    grupo: string | null;
+    numero_invitados: number;
+    socio: {
+        nombre: string;
+        primer_apellido: string;
+        segundo_apellido: string | null;
+    } | null;
+}
+
 export default function PerfilPage() {
     const [socio, setSocio] = useState<SocioData | null>(null);
     const [quota, setQuota] = useState<Quota | null>(null);
@@ -62,6 +73,7 @@ export default function PerfilPage() {
     const [misInscripciones, setMisInscripciones] = useState<string[]>([]);
     const [isAdmin, setIsAdmin] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [grupos, setGrupos] = useState<{ id: string, nombre: string }[]>([]);
     const [registeringEvento, setRegisteringEvento] = useState<Evento | null>(null);
     const [registrationForm, setRegistrationForm] = useState({
         grupo: '',
@@ -84,6 +96,11 @@ export default function PerfilPage() {
     });
     const [updateStatus, setUpdateStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [passwordStatus, setPasswordStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+    const [selectedEventoForList, setSelectedEventoForList] = useState<Evento | null>(null);
+    const [inscritosList, setInscritosList] = useState<InscritoInfo[]>([]);
+    const [loadingInscritos, setLoadingInscritos] = useState(false);
+    const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error', text: string } | null>(null);
+    const [confirmAction, setConfirmAction] = useState<{ title: string, message: string, action: () => void } | null>(null);
     const router = useRouter();
 
     useEffect(() => {
@@ -130,7 +147,7 @@ export default function PerfilPage() {
                     .select('*')
                     .eq('socio_id', data.id)
                     .order('categoria', { ascending: true })
-                    .order('fecha', { ascending: true });
+                    .order('fecha', { ascending: false });
                 if (tData) setTransactions(tData);
 
                 // Fetch Events
@@ -147,6 +164,13 @@ export default function PerfilPage() {
                     .select('evento_id')
                     .eq('socio_id', data.id);
                 if (iData) setMisInscripciones(iData.map(i => i.evento_id));
+
+                // Fetch Available Groups
+                const { data: gData } = await supabase
+                    .from('grupos_eventos')
+                    .select('*')
+                    .order('nombre', { ascending: true });
+                if (gData) setGrupos(gData);
             }
             setLoading(false);
         };
@@ -205,7 +229,8 @@ export default function PerfilPage() {
     const handleChangePassword = async (e: React.FormEvent) => {
         e.preventDefault();
         if (passwordForm.password !== passwordForm.confirmPassword) {
-            alert('Las contraseñas no coinciden');
+            setPasswordStatus('error');
+            setTimeout(() => setPasswordStatus('idle'), 3000);
             return;
         }
 
@@ -233,6 +258,12 @@ export default function PerfilPage() {
         e.preventDefault();
         if (!socio || !registeringEvento) return;
 
+        if (misInscripciones.includes(registeringEvento.id)) {
+            setStatusMsg({ type: 'error', text: 'Ya estás inscrito en este evento.' });
+            setRegisteringEvento(null);
+            return;
+        }
+
         setLoading(true);
         const { error } = await supabase
             .from('inscripciones_eventos')
@@ -244,37 +275,91 @@ export default function PerfilPage() {
             }]);
 
         if (!error) {
-            // Generar cargo pendiente automáticamente
-            const invitadosNum = parseInt(registrationForm.numero_invitados) || 0;
-            const total = registeringEvento.precio_socio + (invitadosNum * registeringEvento.precio_invitado);
-
-            await supabase
-                .from('pagos_cobros')
-                .insert([{
-                    socio_id: socio.id,
-                    tipo: 'cobro',
-                    monto: total,
-                    concepto: `Inscripción Evento: ${registeringEvento.denominacion} (${invitadosNum} invitados)`,
-                    categoria: 'Evento',
-                    estado: 'pendiente'
-                }]);
-
+            // El cargo se genera automáticamente mediante un Trigger en la base de datos (con parent_id)
             setMisInscripciones([...misInscripciones, registeringEvento.id]);
             setRegisteringEvento(null);
             setRegistrationForm({ grupo: '', numero_invitados: '0' });
 
-            // Refresh transactions
-            const { data: tData } = await supabase
-                .from('pagos_cobros')
-                .select('*')
-                .eq('socio_id', socio.id)
-                .order('categoria', { ascending: true })
-                .order('fecha', { ascending: false });
-            if (tData) setTransactions(tData);
+            // Refrescamos las transacciones tras un pequeño delay para que el trigger termine
+            setTimeout(async () => {
+                if (!socio) return;
+                const { data: tData } = await supabase
+                    .from('pagos_cobros')
+                    .select('*')
+                    .eq('socio_id', socio.id)
+                    .order('categoria', { ascending: true })
+                    .order('fecha', { ascending: false });
+                if (tData) setTransactions(tData);
+            }, 800);
+
+            setStatusMsg({ type: 'success', text: '¡Inscripción confirmada!' });
+            setTimeout(() => setStatusMsg(null), 4000);
         } else {
-            console.error('Error al registrarse:', error.message);
+            // Manejo silencioso de errores (duplicados u otros)
+            const isDuplicate = error.code === '23505' || error.message?.includes('unique constraint');
+            if (isDuplicate && !misInscripciones.includes(registeringEvento.id)) {
+                setMisInscripciones(prev => [...prev, registeringEvento.id]);
+            }
+            setRegisteringEvento(null);
+            setTimeout(() => setStatusMsg(null), 4000);
         }
         setLoading(false);
+    };
+
+    const handleUnregister = async (eventoId: string) => {
+        if (!socio) return;
+        setLoading(true);
+        const { error } = await supabase
+            .from('inscripciones_eventos')
+            .delete()
+            .eq('evento_id', eventoId)
+            .eq('socio_id', socio.id);
+
+        if (!error) {
+            setMisInscripciones(misInscripciones.filter(id => id !== eventoId));
+
+            setTimeout(async () => {
+                if (!socio) return;
+                const { data: tData } = await supabase
+                    .from('pagos_cobros')
+                    .select('*')
+                    .eq('socio_id', socio.id)
+                    .order('categoria', { ascending: true })
+                    .order('fecha', { ascending: false });
+                if (tData) setTransactions(tData);
+            }, 800);
+
+            setStatusMsg({ type: 'success', text: 'Inscripción cancelada.' });
+            setTimeout(() => setStatusMsg(null), 3000);
+        }
+        setLoading(false);
+    };
+
+    const fetchInscritos = async (evento: Evento) => {
+        setSelectedEventoForList(evento);
+        setLoadingInscritos(true);
+        setInscritosList([]);
+
+        const { data, error } = await supabase
+            .from('inscripciones_eventos')
+            .select(`
+                id,
+                grupo,
+                numero_invitados,
+                socio:socio_id (
+                    nombre,
+                    primer_apellido,
+                    segundo_apellido
+                )
+            `)
+            .eq('evento_id', evento.id);
+
+        if (error) {
+            console.error('Error fetching inscritos:', error);
+        } else {
+            setInscritosList(data as any || []);
+        }
+        setLoadingInscritos(false);
     };
 
     const generatePDF = () => {
@@ -488,7 +573,7 @@ export default function PerfilPage() {
                                             className="p-3 bg-white border border-gray-100 text-fila-dark rounded-xl hover:bg-gray-50 transition-all shadow-sm flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
                                         >
                                             <Key size={14} className="text-fila-gold" />
-                                            Seguridad
+                                            Cambiar Contraseña
                                         </button>
                                     </div>
                                 </div>
@@ -545,9 +630,17 @@ export default function PerfilPage() {
                     <div className="divide-y divide-gray-100">
                         {eventos.length > 0 ? (
                             eventos.map((e) => (
-                                <div key={e.id} className="p-8 hover:bg-fila-light/20 transition-all flex flex-col md:flex-row md:items-center justify-between gap-6">
-                                    <div className="space-y-2">
-                                        <h4 className="text-xl font-black text-fila-dark uppercase tracking-tight">{e.denominacion}</h4>
+                                <div key={e.id} className="p-8 hover:bg-fila-light/20 transition-all flex flex-col md:flex-row md:items-center justify-between gap-6 group">
+                                    <div
+                                        className="space-y-2 flex-grow cursor-pointer"
+                                        onClick={() => fetchInscritos(e)}
+                                    >
+                                        <div className="flex items-center gap-3">
+                                            <h4 className="text-xl font-black text-fila-dark uppercase tracking-tight group-hover:text-fila-gold transition-colors">{e.denominacion}</h4>
+                                            <div className="opacity-0 group-hover:opacity-100 transition-all bg-fila-gold/10 text-fila-gold px-2 py-0.5 rounded-lg text-[8px] font-black uppercase tracking-widest">
+                                                Ver listado
+                                            </div>
+                                        </div>
                                         <div className="flex flex-wrap gap-4 text-xs font-bold text-gray-400">
                                             <div className="flex items-center gap-1.5">
                                                 <Calendar size={14} className="text-fila-gold" />
@@ -565,10 +658,15 @@ export default function PerfilPage() {
                                     </div>
                                     <div>
                                         {misInscripciones.includes(e.id) ? (
-                                            <div className="flex items-center gap-2 bg-green-50 text-green-600 px-6 py-3 rounded-2xl text-xs font-black tracking-widest uppercase border border-green-100">
-                                                <ShieldCheck size={16} />
-                                                <span>Inscrito</span>
-                                            </div>
+                                            <button
+                                                onClick={() => handleUnregister(e.id)}
+                                                className="flex items-center gap-2 bg-green-50 text-green-600 px-6 py-3 rounded-2xl text-xs font-black tracking-widest uppercase border border-green-100 hover:bg-red-50 hover:text-red-500 hover:border-red-100 transition-all group/cancel"
+                                            >
+                                                <ShieldCheck size={16} className="group-hover/cancel:hidden" />
+                                                <X size={16} className="hidden group-hover/cancel:block" />
+                                                <span className="group-hover/cancel:hidden">Inscrito</span>
+                                                <span className="hidden group-hover/cancel:block">Cancelar</span>
+                                            </button>
                                         ) : new Date(e.fecha_limite) < new Date() ? (
                                             <div className="flex items-center gap-2 bg-gray-100 text-gray-400 px-6 py-3 rounded-2xl text-xs font-black tracking-widest uppercase border border-gray-200 cursor-not-allowed">
                                                 <Clock size={16} />
@@ -746,13 +844,22 @@ export default function PerfilPage() {
                             <form onSubmit={handleRegistration} className="p-10 space-y-6">
                                 <div className="space-y-1.5">
                                     <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">¿Para qué grupo te apuntas?</label>
-                                    <input
-                                        required
-                                        value={registrationForm.grupo}
-                                        onChange={e => setRegistrationForm({ ...registrationForm, grupo: e.target.value })}
-                                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none font-bold"
-                                        placeholder="Escuadra, familia, amigos..."
-                                    />
+                                    <div className="relative">
+                                        <select
+                                            required
+                                            value={registrationForm.grupo}
+                                            onChange={e => setRegistrationForm({ ...registrationForm, grupo: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none font-bold bg-white appearance-none cursor-pointer"
+                                        >
+                                            <option value="" disabled>Selecciona un grupo...</option>
+                                            {grupos.map(g => (
+                                                <option key={g.id} value={g.nombre}>{g.nombre}</option>
+                                            ))}
+                                        </select>
+                                        <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                                            <Users size={18} />
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div className="space-y-1.5">
@@ -935,6 +1042,139 @@ export default function PerfilPage() {
                                             'ACTUALIZAR SEGURIDAD'}
                                 </button>
                             </form>
+                        </div>
+                    </div>
+                )}
+
+                {/* Event Inscritos List Modal */}
+                {selectedEventoForList && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[85vh]">
+                            <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-fila-dark text-white flex-shrink-0">
+                                <div>
+                                    <h2 className="text-xl font-black tracking-tighter uppercase leading-none mb-1">Socios Apuntados</h2>
+                                    <p className="text-[10px] text-white/70 font-black uppercase tracking-[0.2em]">{selectedEventoForList.denominacion}</p>
+                                </div>
+                                <button onClick={() => setSelectedEventoForList(null)} className="p-2 hover:bg-white/10 rounded-full transition-all">
+                                    <X size={24} />
+                                </button>
+                            </div>
+
+                            <div className="p-4 bg-fila-light/30 border-b border-gray-100 flex justify-between items-center px-10 flex-shrink-0">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-fila-gold shadow-sm">
+                                        <User size={16} />
+                                    </div>
+                                    <span className="text-xs font-black text-fila-dark uppercase tracking-widest">
+                                        Total: <span className="text-fila-gold">{inscritosList.length}</span> SOCIOS
+                                        {inscritosList.reduce((acc, curr) => acc + (curr.numero_invitados || 0), 0) > 0 && (
+                                            <> + <span className="text-fila-gold">{inscritosList.reduce((acc, curr) => acc + (curr.numero_invitados || 0), 0)}</span> INVITADOS</>
+                                        )}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="overflow-y-auto flex-grow p-6 md:p-10">
+                                {loadingInscritos ? (
+                                    <div className="py-20 flex flex-col items-center justify-center text-gray-400">
+                                        <Loader2 className="w-10 h-10 animate-spin mb-4 text-fila-gold" />
+                                        <p className="text-xs font-black uppercase tracking-widest">Cargando listado...</p>
+                                    </div>
+                                ) : inscritosList.length > 0 ? (
+                                    <div className="grid gap-4">
+                                        {inscritosList.sort((a, b) => {
+                                            const nameA = `${a.socio?.primer_apellido} ${a.socio?.nombre}`.toLowerCase();
+                                            const nameB = `${b.socio?.primer_apellido} ${b.socio?.nombre}`.toLowerCase();
+                                            return nameA.localeCompare(nameB);
+                                        }).map((inscrito, idx) => (
+                                            <div key={inscrito.id} className="flex items-center justify-between p-5 bg-fila-light/20 rounded-3xl border border-transparent hover:border-fila-gold/20 transition-all">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-10 h-10 rounded-2xl bg-white flex items-center justify-center text-fila-gold font-black text-xs shadow-sm shadow-fila-gold/5">
+                                                        {idx + 1}
+                                                    </div>
+                                                    <div>
+                                                        <p className="font-black text-fila-dark uppercase text-sm tracking-tight">
+                                                            {inscrito.socio?.nombre} <span className="text-fila-gold">{inscrito.socio?.primer_apellido} {inscrito.socio?.segundo_apellido}</span>
+                                                        </p>
+                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                                                                {inscrito.grupo || 'Sin grupo'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {inscrito.numero_invitados > 0 && (
+                                                    <div className="bg-white border border-gray-100 flex items-center gap-2 px-3 py-1.5 rounded-xl shadow-sm">
+                                                        <div className="flex -space-x-1">
+                                                            {[...Array(Math.min(3, inscrito.numero_invitados))].map((_, i) => (
+                                                                <div key={i} className="w-4 h-4 rounded-full bg-gray-100 border border-white flex items-center justify-center">
+                                                                    <User size={8} className="text-gray-400" />
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        <span className="text-[10px] font-black text-fila-gold">+{inscrito.numero_invitados}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="py-20 text-center text-gray-400 bg-gray-50/50 rounded-[32px] border-2 border-dashed border-gray-100">
+                                        <Calendar size={40} className="mx-auto mb-4 opacity-20" />
+                                        <p className="text-xs font-bold uppercase tracking-widest">No hay nadie apuntado todavía</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="px-10 py-6 border-t border-gray-100 bg-gray-50 flex justify-end flex-shrink-0">
+                                <button
+                                    onClick={() => setSelectedEventoForList(null)}
+                                    className="px-8 py-3 bg-fila-dark text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all"
+                                >
+                                    Cerrar
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Custom Confirmation Modal */}
+                {confirmAction && (
+                    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                            <div className="p-10 text-center">
+                                <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                                    <Trash2 size={32} />
+                                </div>
+                                <h3 className="text-xl font-black text-fila-dark uppercase tracking-tight mb-2">{confirmAction.title}</h3>
+                                <p className="text-sm text-gray-500 font-medium mb-8 leading-relaxed">
+                                    {confirmAction.message}
+                                </p>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => setConfirmAction(null)}
+                                        className="flex-1 px-6 py-4 rounded-2xl bg-gray-100 text-gray-500 font-bold hover:bg-gray-200 transition-all text-xs uppercase tracking-widest"
+                                    >
+                                        Atrás
+                                    </button>
+                                    <button
+                                        onClick={confirmAction.action}
+                                        className="flex-1 px-6 py-4 rounded-2xl bg-red-500 text-white font-black hover:bg-red-600 transition-all shadow-lg shadow-red-200 text-xs uppercase tracking-widest"
+                                    >
+                                        SÍ, ANULAR
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Status Feedback Toast/Modal */}
+                {statusMsg && (
+                    <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[200] animate-in slide-in-from-bottom-5 duration-300">
+                        <div className={`px-8 py-4 rounded-2xl shadow-2xl flex items-center gap-3 font-bold text-xs uppercase tracking-widest ${statusMsg.type === 'success' ? 'bg-fila-green text-white' : 'bg-red-500 text-white'}`}>
+                            {statusMsg.type === 'success' ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+                            {statusMsg.text}
                         </div>
                     </div>
                 )}

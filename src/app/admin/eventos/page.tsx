@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Eye, MoreVertical, LayoutDashboard, Ticket, Euro, Calendar, Search, Users, LogOut, MapPin, Music, Flag, Download, FileText } from 'lucide-react';
+import { Shield, Plus, Edit2, Trash2, Loader2, ArrowLeft, X, Save, Eye, MoreVertical, LayoutDashboard, Ticket, Euro, Calendar, Search, Users, LogOut, MapPin, Music, Flag, Download, FileText, AlertCircle } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import Link from 'next/link';
@@ -46,6 +46,11 @@ export default function AdminEventos() {
     const [viewingInscripciones, setViewingInscripciones] = useState<Evento | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [isExporting, setIsExporting] = useState(false);
+    const [isGroupsModalOpen, setIsGroupsModalOpen] = useState(false);
+    const [grupos, setGrupos] = useState<{ id: string, nombre: string }[]>([]);
+    const [newGroupName, setNewGroupName] = useState('');
+    const [confirmAction, setConfirmAction] = useState<{ title: string, message: string, action: () => void } | null>(null);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     const router = useRouter();
     const pathname = usePathname();
@@ -99,6 +104,39 @@ export default function AdminEventos() {
         if (data) setEventos(data);
         setLoading(false);
     };
+
+    const fetchGrupos = async () => {
+        const { data } = await supabase.from('grupos_eventos').select('*').order('nombre', { ascending: true });
+        if (data) setGrupos(data);
+    };
+
+    const handleAddGroup = async () => {
+        if (!newGroupName.trim()) return;
+        const { error } = await supabase.from('grupos_eventos').insert([{ nombre: newGroupName.trim() }]);
+        if (!error) {
+            setNewGroupName('');
+            fetchGrupos();
+        }
+    };
+
+    const handleDeleteGroup = async (id: string) => {
+        setConfirmAction({
+            title: 'Eliminar Grupo',
+            message: '¿Estás seguro de que quieres eliminar este grupo? Los socios que ya lo tengan seleccionado no se verán afectados, pero ya no aparecerá como opción.',
+            action: async () => {
+                const { error } = await supabase.from('grupos_eventos').delete().eq('id', id);
+                if (!error) fetchGrupos();
+                setConfirmAction(null);
+            }
+        });
+    };
+
+    useEffect(() => {
+        if (isAdmin) {
+            fetchEventos();
+            fetchGrupos();
+        }
+    }, [isAdmin]);
 
     const fetchInscripciones = async (eventoId: string) => {
         const { data, error } = await supabase
@@ -156,18 +194,23 @@ export default function AdminEventos() {
             });
             fetchEventos();
         } else {
-            alert('Error: ' + result.error.message);
+            setErrorMsg('Error: ' + result.error.message);
         }
         setLoading(false);
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('¿Estás seguro de eliminar este evento?')) return;
-
-        const { error } = await supabase.from('eventos').delete().eq('id', id);
-        if (!error) {
-            setEventos(eventos.filter(e => e.id !== id));
-        }
+        setConfirmAction({
+            title: 'Eliminar Evento',
+            message: '¿Estás seguro de que quieres eliminar este evento permanentemente? Esta acción borrará también todas las inscripciones asociadas.',
+            action: async () => {
+                const { error } = await supabase.from('eventos').delete().eq('id', id);
+                if (!error) {
+                    setEventos(eventos.filter(e => e.id !== id));
+                }
+                setConfirmAction(null);
+            }
+        });
     };
 
     const openEdit = (evento: Evento) => {
@@ -326,6 +369,13 @@ export default function AdminEventos() {
                                 className="w-full pl-10 pr-4 py-2 md:py-2.5 rounded-xl border border-gray-200 focus:border-fila-gold outline-none text-xs md:text-sm transition-all"
                             />
                         </div>
+                        <button
+                            onClick={() => setIsGroupsModalOpen(true)}
+                            className="p-2.5 md:px-5 md:py-2.5 bg-white border border-gray-200 text-fila-dark rounded-xl md:rounded-2xl hover:bg-gray-50 transition-all flex items-center gap-2"
+                        >
+                            <Users size={18} className="text-fila-gold" />
+                            <span className="hidden md:inline text-sm font-black uppercase tracking-tight">Gestionar Grupos</span>
+                        </button>
                         <button
                             onClick={() => { setEditingEvento(null); setIsModalOpen(true); }}
                             className="p-2.5 md:px-5 md:py-2.5 bg-fila-green text-white rounded-xl md:rounded-2xl hover:bg-fila-green/90 transition-all shadow-xl shadow-fila-green/10 flex items-center gap-2"
@@ -652,6 +702,121 @@ export default function AdminEventos() {
                                 <span className="text-fila-dark text-lg font-black">
                                     {inscripciones.reduce((acc, curr) => acc + 1 + curr.numero_invitados, 0)}
                                 </span>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Manage Groups Modal */}
+                {isGroupsModalOpen && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-md rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                            <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-fila-gold text-white">
+                                <div>
+                                    <h2 className="text-xl font-black tracking-tighter uppercase leading-none mb-1">Grupos de Eventos</h2>
+                                    <p className="text-[10px] text-white/70 font-black uppercase tracking-[0.2em]">Opciones para el formulario de inscripción</p>
+                                </div>
+                                <button onClick={() => setIsGroupsModalOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-all">
+                                    <X size={24} />
+                                </button>
+                            </div>
+                            <div className="p-10 space-y-6">
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Añadir Nuevo Grupo</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            value={newGroupName}
+                                            onChange={e => setNewGroupName(e.target.value)}
+                                            onKeyDown={e => e.key === 'Enter' && handleAddGroup()}
+                                            className="flex-1 px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none font-bold"
+                                            placeholder="Ej: Escuadra Almogávares"
+                                        />
+                                        <button
+                                            onClick={handleAddGroup}
+                                            className="p-3 bg-fila-dark text-white rounded-2xl hover:bg-black transition-all"
+                                        >
+                                            <Plus size={20} />
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Grupos Actuales</p>
+                                    <div className="max-h-60 overflow-y-auto pr-2 space-y-2">
+                                        {grupos.map(group => (
+                                            <div key={group.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl group/item">
+                                                <span className="font-bold text-fila-dark uppercase text-xs">{group.nombre}</span>
+                                                <button
+                                                    onClick={() => handleDeleteGroup(group.id)}
+                                                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                                                >
+                                                    <Trash2 size={16} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={() => setIsGroupsModalOpen(false)}
+                                    className="w-full py-4 bg-fila-light text-fila-gold rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-gray-100 transition-all"
+                                >
+                                    Cerrar Gestión
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Custom Confirmation Modal */}
+                {confirmAction && (
+                    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                            <div className="p-10 text-center">
+                                <div className="w-16 h-16 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                                    <Trash2 size={32} />
+                                </div>
+                                <h3 className="text-xl font-black text-fila-dark uppercase tracking-tight mb-2">{confirmAction.title}</h3>
+                                <p className="text-sm text-gray-500 font-medium mb-8 leading-relaxed">
+                                    {confirmAction.message}
+                                </p>
+                                <div className="flex gap-3">
+                                    <button
+                                        onClick={() => setConfirmAction(null)}
+                                        className="flex-1 px-6 py-4 rounded-2xl bg-gray-100 text-gray-500 font-bold hover:bg-gray-200 transition-all text-xs uppercase tracking-widest"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        onClick={confirmAction.action}
+                                        className="flex-1 px-6 py-4 rounded-2xl bg-red-500 text-white font-black hover:bg-red-600 transition-all shadow-lg shadow-red-200 text-xs uppercase tracking-widest"
+                                    >
+                                        ELIMINAR
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Custom Error Modal */}
+                {errorMsg && (
+                    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-sm rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                            <div className="p-10 text-center">
+                                <div className="w-16 h-16 bg-orange-50 text-orange-500 rounded-2xl flex items-center justify-center mx-auto mb-6">
+                                    <AlertCircle size={32} />
+                                </div>
+                                <h3 className="text-xl font-black text-fila-dark uppercase tracking-tight mb-2">¡Vaya! Algo ha fallado</h3>
+                                <p className="text-sm text-gray-500 font-medium mb-8 leading-relaxed">
+                                    {errorMsg}
+                                </p>
+                                <button
+                                    onClick={() => setErrorMsg(null)}
+                                    className="w-full px-6 py-4 rounded-2xl bg-fila-dark text-white font-black hover:bg-black transition-all text-xs uppercase tracking-widest"
+                                >
+                                    ENTENDIDO
+                                </button>
                             </div>
                         </div>
                     </div>
