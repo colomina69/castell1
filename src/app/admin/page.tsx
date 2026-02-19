@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Shield, Search, UserPlus, Edit2, Trash2, UserCheck, Loader2, ArrowLeft, MoreVertical, X, Check, Mail, Phone, Euro, Ticket, Save, LayoutDashboard, Settings, LogOut, Calendar, Users, Info, FileText } from 'lucide-react';
+import { Shield, Search, UserPlus, Edit2, Trash2, UserCheck, Loader2, ArrowLeft, MoreVertical, X, Check, Mail, Phone, Euro, Ticket, Save, LayoutDashboard, Settings, LogOut, Calendar, Users, Info, FileText, Star } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import { AdminSidebar } from '@/components/AdminSidebar';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -49,6 +50,7 @@ interface Transaction {
     monto: number;
     concepto: string;
     categoria: string;
+    subcategoria?: string;
     fecha: string;
     estado: 'pendiente' | 'completado' | 'cancelado';
     socios: {
@@ -57,14 +59,18 @@ interface Transaction {
     };
 }
 
-export default function AdminDashboard() {
+function AdminDashboardContent() {
+    const searchParams = useSearchParams();
+    const initialSearch = searchParams.get('search') || '';
+
     const [socios, setSocios] = useState<Socio[]>([]);
     const [quotas, setQuotas] = useState<Quota[]>([]);
     const [sorteos, setSorteos] = useState<Sorteo[]>([]);
     const [profiles, setProfiles] = useState<Profile[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [activeTab, setActiveTab] = useState<'socios' | 'movimientos'>('socios');
+    const [loading, setLoading] = useState(initialSearch ? false : true);
+    const [searchTerm, setSearchTerm] = useState(initialSearch);
+    const initialTab = searchParams.get('tab') as 'socios' | 'movimientos' | 'balance' || 'socios';
+    const [activeTab, setActiveTab] = useState<'socios' | 'movimientos' | 'balance'>(initialTab);
     const [isAdmin, setIsAdmin] = useState(false);
     const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
     const [chargingId, setChargingId] = useState<string | null>(null);
@@ -77,6 +83,7 @@ export default function AdminDashboard() {
     const [transactionSocio, setTransactionSocio] = useState<Socio | null>(null);
     const [loteriaSocio, setLoteriaSocio] = useState<Socio | null>(null);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [isGastoModalOpen, setIsGastoModalOpen] = useState(false);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
 
     const [transactionForm, setTransactionForm] = useState({
@@ -92,11 +99,52 @@ export default function AdminDashboard() {
         cantidad: '1'
     });
 
+    const [gastoForm, setGastoForm] = useState({
+        monto: '',
+        concepto: '',
+        categoria: 'Local Social',
+        subcategoria: ''
+    });
+
+    const subcategoriasMap: Record<string, string[]> = {
+        'Local Social': ['Mantenimiento', 'Luz', 'Agua', 'Limpieza', 'Alquiler', 'Seguros', 'Otros'],
+        'Celebraciones': ['Música (Actos)', 'Flores', 'Pólvora', 'Carpas/Infraestructura', 'Imprenta/Libro', 'Otros'],
+        'Bandas Música': ['Honorarios', 'Comida', 'Transporte', 'Alojamiento', 'Otros'],
+        'Gastos Corrientes': ['Material Oficina', 'Correos', 'Gestoría', 'Seguros', 'Comisiones Bancarias', 'Otros'],
+        'Comida Fiestas': ['Catering', 'Compras Supermercado', 'Bebidas', 'Camareros/Personal', 'Otros'],
+        'Bebida Fiestas': ['Compra Bebidas', 'Servicio Barra', 'Otros'],
+        'Aniversario': ['Actos Especiales', 'Publicaciones', 'Recuerdos/Detalles', 'Otros'],
+        'Marketing': ['Merchandising', 'Redes Sociales', 'Publicidad', 'Web/Hosting', 'Otros'],
+        'Gasto': ['Otros Gastos']
+    };
+
     const [isEventModalOpen, setIsEventModalOpen] = useState(false);
     const [selectedEvento, setSelectedEvento] = useState<any>(null);
     const [eventInscripciones, setEventInscripciones] = useState<any[]>([]);
     const [eventosList, setEventosList] = useState<any[]>([]);
     const [chargingEvent, setChargingEvent] = useState(false);
+
+    const [balanceData, setBalanceData] = useState({
+        ingresosCuotas: 0,
+        ingresosLoteria: 0,
+        ingresosEventos: 0,
+        ingresosMarketing: 0,
+        ingresosOtros: 0,
+        gastosLocal: 0,
+        gastosCelebraciones: 0,
+        gastosBandas: 0,
+        gastosCorrientes: 0,
+        gastosComida: 0,
+        gastosBebida: 0,
+        gastosAniversario: 0,
+        gastosMarketing: 0,
+        gastosOtros: 0,
+        totalIngresos: 0,
+        totalGastos: 0,
+        balance: 0,
+        desgloseGastos: {} as Record<string, Record<string, number>>,
+        desgloseIngresos: {} as Record<string, Record<string, number>>
+    });
 
     const [createForm, setCreateForm] = useState({
         nombre: '',
@@ -111,6 +159,13 @@ export default function AdminDashboard() {
         loteria_especial_extra: 0,
         grupo: ''
     });
+
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        if (tab === 'balance' || tab === 'socios' || tab === 'movimientos') {
+            setActiveTab(tab as any);
+        }
+    }, [searchParams]);
 
     useEffect(() => {
         const checkAdmin = async () => {
@@ -138,6 +193,7 @@ export default function AdminDashboard() {
             fetchSorteos();
             fetchEventos();
             fetchRecentTransactions();
+            fetchBalanceData();
         };
 
         checkAdmin();
@@ -175,20 +231,183 @@ export default function AdminDashboard() {
         if (data) setRecentTransactions(data as any);
     };
 
+    const fetchBalanceData = async () => {
+        const { data, error } = await supabase
+            .from('pagos_cobros')
+            .select(`
+                *,
+                loterias_asignadas(sorteos(precio, recargo)),
+                parent:parent_id(
+                    loterias_asignadas(
+                        sorteos(precio, recargo)
+                    )
+                )
+            `)
+            .eq('estado', 'completado');
+
+        if (error) {
+            console.error('Error fetching balance data:', error);
+            return;
+        }
+
+        if (data) {
+            const totals = data.reduce((acc, t) => {
+                const monto = Number(t.monto);
+                if (t.tipo === 'pago') {
+                    // INGRESOS (En la tabla pagos_cobros, tipo 'pago' para el socio es un ingreso para la Filà)
+                    if (t.categoria === 'Cuota') acc.ingresosCuotas += monto;
+                    else if (t.categoria === 'Lotería') {
+                        // Calcular solo el beneficio (el recargo)
+                        let profitAmount = monto;
+                        const sorteoInfo = t.loterias_asignadas?.[0]?.sorteos || (t as any).parent?.loterias_asignadas?.[0]?.sorteos;
+
+                        if (sorteoInfo) {
+                            const precio = Number(sorteoInfo.precio);
+                            const recargo = Number(sorteoInfo.recargo);
+                            const totalTicket = precio + recargo;
+                            if (totalTicket > 0) {
+                                profitAmount = monto * (recargo / totalTicket);
+                            }
+                        } else {
+                            // Fallback: Si no hay link, asumimos que es lotería mensual estándar (7€ total, 1€ recargo)
+                            // o intentamos buscar el texto en el concepto
+                            if (t.concepto?.toLowerCase().includes('mensual')) {
+                                profitAmount = monto * (1 / 7);
+                            } else {
+                                // Si no podemos determinarlo, dejamos el monto entero o aplicamos un % estimado?
+                                // El usuario dice "solo beneficio", así que si no sabemos, mejor ser conservadores.
+                                // Podríamos usar un 15% como media, pero mejor dejarlo documentado.
+                                profitAmount = monto * 0.15; // Estimación general 15% si no hay datos
+                            }
+                        }
+                        acc.ingresosLoteria += profitAmount;
+                    } else if (t.categoria === 'Evento' || t.categoria === 'Festejos/Actos') acc.ingresosEventos += monto;
+                    else if (t.categoria === 'Marketing/Material' || t.categoria === 'Marketing/Ventas') acc.ingresosMarketing += monto;
+                    else if (t.categoria === 'Local Social') acc.gastosLocal += monto;
+                    else if (t.categoria === 'Celebraciones') acc.gastosCelebraciones += monto;
+                    else if (t.categoria === 'Bandas Música') acc.gastosBandas += monto;
+                    else if (t.categoria === 'Gastos Corrientes') acc.gastosCorrientes += monto;
+                    else if (t.categoria === 'Comida Fiestas') acc.gastosComida += monto;
+                    else if (t.categoria === 'Bebida Fiestas') acc.gastosBebida += monto;
+                    else if (t.categoria === 'Aniversario') acc.gastosAniversario += monto;
+                    else if (t.categoria === 'Marketing' && t.tipo === 'pago' && !t.socio_id) acc.gastosMarketing += monto;
+                    else if (t.categoria === 'Gasto' || t.categoria === 'Otros Gastos') acc.gastosOtros += monto;
+                    else acc.ingresosOtros += monto;
+
+                    // Desglose por subcategoría de GASTOS (Filà)
+                    if (!t.socio_id || (t.categoria !== 'Cuota' && t.categoria !== 'Lotería' && t.categoria !== 'Evento' && t.categoria !== 'Festejos/Actos')) {
+                        const cat = t.categoria || 'Sin Categoría';
+                        const sub = t.subcategoria || 'Otros';
+                        if (!acc.desgloseGastos[cat]) acc.desgloseGastos[cat] = {};
+                        acc.desgloseGastos[cat][sub] = (acc.desgloseGastos[cat][sub] || 0) + monto;
+                    }
+
+                    // Desglose de INGRESOS (Socios)
+                    if (t.socio_id) {
+                        let cat = t.categoria || 'Otros';
+                        if (cat === 'Festejos/Actos') cat = 'Evento';
+                        if (cat === 'Marketing/Material' || cat === 'Marketing/Ventas') cat = 'Marketing';
+
+                        let sub = 'Otros';
+                        let val = monto;
+
+                        if (cat === 'Cuota') {
+                            const parts = t.concepto?.split(':');
+                            sub = parts && parts.length > 1 ? parts[1].trim() : (t.concepto || 'Cuota General');
+                        } else if (cat === 'Lotería') {
+                            // ... existing lottery logic ...
+                            let localProfit = monto;
+                            const sorteoInfo = t.loterias_asignadas?.[0]?.sorteos || (t as any).parent?.loterias_asignadas?.[0]?.sorteos;
+                            if (sorteoInfo) {
+                                const precio = Number(sorteoInfo.precio);
+                                const recargo = Number(sorteoInfo.recargo);
+                                const totalTicket = precio + recargo;
+                                if (totalTicket > 0) localProfit = monto * (recargo / totalTicket);
+                            } else if (t.concepto?.toLowerCase().includes('mensual')) {
+                                localProfit = monto * (1 / 7);
+                            } else {
+                                localProfit = monto * 0.15;
+                            }
+                            val = localProfit;
+                            sub = t.concepto?.split(':').pop()?.split('(')[0]?.trim() || 'Sorteos';
+                        } else if (cat === 'Evento') {
+                            const parts = t.concepto?.split(':');
+                            sub = parts && parts.length > 1 ? parts[1].trim().split('(')[0].trim() : (t.concepto || 'Varios');
+                        } else {
+                            sub = t.subcategoria || 'Varios';
+                        }
+
+                        if (!acc.desgloseIngresos[cat]) acc.desgloseIngresos[cat] = {};
+                        acc.desgloseIngresos[cat][sub] = (acc.desgloseIngresos[cat][sub] || 0) + val;
+                    }
+                } else if (t.tipo === 'cobro') {
+                    // Si registramos un cobro que sea devolución o pago de la filà
+                    if (t.categoria === 'Local Social') acc.gastosLocal += monto;
+                    else if (t.categoria === 'Celebraciones') acc.gastosCelebraciones += monto;
+                    else if (t.categoria === 'Bandas Música') acc.gastosBandas += monto;
+                    else if (t.categoria === 'Gastos Corrientes') acc.gastosCorrientes += monto;
+                    else if (t.categoria === 'Comida Fiestas') acc.gastosComida += monto;
+                    else if (t.categoria === 'Bebida Fiestas') acc.gastosBebida += monto;
+                    else if (t.categoria === 'Aniversario') acc.gastosAniversario += monto;
+                    else if (t.categoria === 'Marketing') acc.gastosMarketing += monto;
+                    else if (t.categoria === 'Gasto') acc.gastosOtros += monto;
+                }
+                return acc;
+            }, {
+                ingresosCuotas: 0,
+                ingresosLoteria: 0,
+                ingresosEventos: 0,
+                ingresosMarketing: 0,
+                ingresosOtros: 0,
+                gastosLocal: 0,
+                gastosCelebraciones: 0,
+                gastosBandas: 0,
+                gastosCorrientes: 0,
+                gastosComida: 0,
+                gastosBebida: 0,
+                gastosAniversario: 0,
+                gastosMarketing: 0,
+                gastosOtros: 0,
+                desgloseGastos: {} as Record<string, Record<string, number>>,
+                desgloseIngresos: {} as Record<string, Record<string, number>>
+            });
+
+            const totalIngresos = totals.ingresosCuotas + totals.ingresosLoteria + totals.ingresosEventos + totals.ingresosMarketing + totals.ingresosOtros;
+            const totalGastos = totals.gastosLocal + totals.gastosCelebraciones + totals.gastosBandas + totals.gastosCorrientes + totals.gastosComida + totals.gastosBebida + totals.gastosAniversario + totals.gastosMarketing + totals.gastosOtros;
+
+            setBalanceData({
+                ...totals,
+                totalIngresos,
+                totalGastos,
+                balance: totalIngresos - totalGastos
+            });
+        }
+    };
+
     const exportToCSV = (data: Transaction[]) => {
-        const headers = ['Socio', 'Concepto', 'Categoría', 'Tipo', 'Monto', 'Fecha', 'Estado'];
-        const csvRows = [
-            headers.join(','),
-            ...data.map(t => [
-                `"${t.socios?.nombre} ${t.socios?.primer_apellido}"`,
+        const headers = ['Socio / Entidad', 'Concepto', 'Categoría', 'Tipo', 'Monto', 'Fecha', 'Estado'];
+        let csvRows = [];
+
+        if (activeTab === 'balance') {
+            csvRows.push(['RESUMEN DE TESORERIA']);
+            csvRows.push(['Total Ingresos', balanceData.totalIngresos.toFixed(2) + '€']);
+            csvRows.push(['Total Gastos', balanceData.totalGastos.toFixed(2) + '€']);
+            csvRows.push(['BALANCE NETO', balanceData.balance.toFixed(2) + '€']);
+            csvRows.push([]); // Spacer
+        }
+
+        csvRows.push(headers.join(','));
+        data.forEach(t => {
+            csvRows.push([
+                `"${t.socios ? t.socios.nombre + ' ' + t.socios.primer_apellido : 'Administración'}"`,
                 `"${t.concepto}"`,
                 `"${t.categoria}"`,
                 `"${t.tipo}"`,
                 t.monto,
                 `"${new Date(t.fecha).toLocaleString()}"`,
                 `"${t.estado}"`
-            ].join(','))
-        ];
+            ].join(','));
+        });
 
         const csvContent = csvRows.join('\n');
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -205,30 +424,57 @@ export default function AdminDashboard() {
     const exportToPDF = (data: Transaction[]) => {
         const doc = new jsPDF();
 
-        doc.setFontSize(20);
-        doc.text('Informe Financiero - Filà Moros del Castell', 14, 22);
-        doc.setFontSize(11);
+        doc.setFontSize(22);
+        doc.text('Filà Moros del Castell', 14, 22);
+        doc.setFontSize(14);
         doc.setTextColor(100);
-        doc.text(`Generado el: ${new Date().toLocaleString()}`, 14, 30);
+        doc.text(activeTab === 'balance' ? 'Informe de Balance de Tesorería' : 'Informe Detallado de Movimientos', 14, 30);
+        doc.setFontSize(10);
+        doc.text(`Generado el: ${new Date().toLocaleString()}`, 14, 38);
+
+        let startY = 45;
+
+        if (activeTab === 'balance') {
+            // Summary for Balance
+            doc.setFillColor(248, 249, 250);
+            doc.rect(14, 45, 182, 35, 'F');
+
+            doc.setFontSize(12);
+            doc.setTextColor(40);
+            doc.setFont('helvetica', 'bold');
+            doc.text('Resumen de Arcas:', 20, 55);
+
+            doc.setFontSize(10);
+            doc.setFont('helvetica', 'normal');
+            doc.text(`Total Ingresos: +${balanceData.totalIngresos.toFixed(2)}€`, 20, 65);
+            doc.text(`Total Gastos: -${balanceData.totalGastos.toFixed(2)}€`, 20, 72);
+
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(balanceData.balance >= 0 ? 0 : 200, balanceData.balance >= 0 ? 100 : 0, 0);
+            doc.text(`BALANCE NETO: ${balanceData.balance.toFixed(2)}€`, 120, 65);
+
+            startY = 90;
+        }
 
         const tableData = data.map(t => [
-            `${t.socios?.nombre} ${t.socios?.primer_apellido}`,
+            t.socios ? `${t.socios?.nombre} ${t.socios?.primer_apellido}` : '---',
             t.concepto,
             t.categoria,
-            t.tipo === 'cobro' ? '-' + t.monto + '€' : '+' + t.monto + '€',
+            t.tipo === 'pago' ? '+' + t.monto + '€' : '-' + t.monto + '€',
             new Date(t.fecha).toLocaleDateString(),
             t.estado
         ]);
 
         autoTable(doc, {
-            head: [['Socio', 'Concepto', 'Cat.', 'Monto', 'Fecha', 'Estado']],
+            head: [['Socio / Entidad', 'Concepto', 'Categoría', 'Monto', 'Fecha', 'Estado']],
             body: tableData,
-            startY: 40,
+            startY: startY,
             styles: { fontSize: 8 },
-            headStyles: { fillColor: [184, 134, 11] } // Fila gold color-ish
+            headStyles: { fillColor: [184, 134, 11] }
         });
 
-        doc.save(`informe_financiero_${new Date().toISOString().split('T')[0]}.pdf`);
+        doc.save(`informe_${activeTab}_${new Date().toISOString().split('T')[0]}.pdf`);
     };
 
     const handleExport = async (type: 'csv' | 'pdf') => {
@@ -436,6 +682,40 @@ export default function AdminDashboard() {
         setChargingId(null);
     };
 
+    const handleCreateGasto = async (e: React.FormEvent) => {
+        e.preventDefault();
+        const montoStr = gastoForm.monto.replace(',', '.');
+        const montoNum = parseFloat(montoStr);
+
+        if (isNaN(montoNum) || montoNum <= 0) {
+            alert('Por favor, introduce un monto válido.');
+            return;
+        }
+
+        setLoading(true);
+        const { error } = await supabase
+            .from('pagos_cobros')
+            .insert([{
+                socio_id: null, // Asumimos que el balance general no requiere socio_id o permite null
+                tipo: 'pago',
+                monto: montoNum,
+                concepto: gastoForm.concepto,
+                categoria: gastoForm.categoria,
+                subcategoria: gastoForm.subcategoria,
+                estado: 'completado'
+            }]);
+
+        if (!error) {
+            setIsGastoModalOpen(false);
+            setGastoForm({ monto: '', concepto: '', categoria: 'Local Social', subcategoria: '' });
+            fetchBalanceData();
+            fetchRecentTransactions();
+        } else {
+            alert('Error al registrar el gasto: ' + error.message);
+        }
+        setLoading(false);
+    };
+
     const handleAssignLoteria = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!loteriaSocio || !loteriaForm.sorteo_id) return;
@@ -632,12 +912,20 @@ export default function AdminDashboard() {
                             <Euro size={16} />
                             <span>Historial Movimientos</span>
                         </button>
+                        <button
+                            onClick={() => setActiveTab('balance')}
+                            className={`flex items-center gap-2.5 px-6 py-3 rounded-[18px] text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'balance'
+                                ? 'bg-fila-dark text-white shadow-lg shadow-fila-dark/20'
+                                : 'text-gray-400 hover:text-gray-600 hover:bg-white'
+                                }`}
+                        >
+                            <LayoutDashboard size={16} />
+                            <span>Balance Financiero</span>
+                        </button>
                     </div>
 
-                    {activeTab === 'socios' ? (
+                    {activeTab === 'socios' && (
                         <>
-
-
                             {/* Members List - Card View (Mobile) */}
                             <div className="grid grid-cols-1 gap-4 md:hidden pb-10">
                                 {filteredSocios.map((s) => (
@@ -798,7 +1086,9 @@ export default function AdminDashboard() {
                                 </div>
                             </div>
                         </>
-                    ) : (
+                    )}
+
+                    {activeTab === 'movimientos' && (
                         /* Historial Movimientos Tab Content */
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <div className="flex justify-end gap-3 mb-6">
@@ -829,6 +1119,7 @@ export default function AdminDashboard() {
                                                 <th className="px-6 py-5 text-[9px] font-black text-gray-400 uppercase tracking-widest">Monto</th>
                                                 <th className="px-6 py-5 text-[9px] font-black text-gray-400 uppercase tracking-widest">Fecha</th>
                                                 <th className="px-6 py-5 text-[9px] font-black text-gray-400 uppercase tracking-widest">Estado</th>
+                                                <th className="px-6 py-5 text-[9px] font-black text-gray-400 uppercase tracking-widest">Categoría / Sub.</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-100">
@@ -837,11 +1128,21 @@ export default function AdminDashboard() {
                                                     <td className="px-6 py-5">
                                                         <div className="flex items-center gap-3">
                                                             <div className="w-8 h-8 rounded-xl bg-fila-light flex items-center justify-center text-fila-gold font-bold text-[10px]">
-                                                                {t.socios?.nombre[0]}{t.socios?.primer_apellido[0]}
+                                                                {t.socios ? `${t.socios.nombre[0] || ''}${t.socios.primer_apellido[0] || ''}` : t.categoria[0] || 'G'}
                                                             </div>
-                                                            <p className="font-bold text-fila-dark uppercase tracking-tight truncate max-w-[150px]">
-                                                                {t.socios?.nombre} {t.socios?.primer_apellido}
-                                                            </p>
+                                                            {t.socios ? (
+                                                                <Link
+                                                                    href={`/admin?search=${t.socios.nombre} ${t.socios.primer_apellido}`}
+                                                                    className="font-bold text-fila-dark uppercase tracking-tight truncate max-w-[150px] hover:text-fila-gold transition-colors"
+                                                                    title="Ver perfil del socio"
+                                                                >
+                                                                    {t.socios.nombre} {t.socios.primer_apellido}
+                                                                </Link>
+                                                            ) : (
+                                                                <p className="font-bold text-fila-dark uppercase tracking-tight truncate max-w-[150px]">
+                                                                    {t.concepto}
+                                                                </p>
+                                                            )}
                                                         </div>
                                                     </td>
                                                     <td className="px-6 py-5">
@@ -855,7 +1156,7 @@ export default function AdminDashboard() {
                                                     </td>
                                                     <td className="px-6 py-5">
                                                         <p className={`font-black text-base ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
-                                                            {t.tipo === 'pago' ? '+' : '-'}{Number(t.monto).toFixed(2)}€
+                                                            {t.tipo === 'pago' ? '+' : '-'}{(Number(t.monto) || 0).toFixed(2)}€
                                                         </p>
                                                     </td>
                                                     <td className="px-6 py-5">
@@ -872,6 +1173,14 @@ export default function AdminDashboard() {
                                                             {t.estado}
                                                         </span>
                                                     </td>
+                                                    <td className="px-6 py-5">
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[10px] font-black text-fila-dark uppercase tracking-tight">{t.categoria}</span>
+                                                            {t.subcategoria && (
+                                                                <span className="text-[9px] text-gray-400 font-bold uppercase tracking-widest">{t.subcategoria}</span>
+                                                            )}
+                                                        </div>
+                                                    </td>
                                                 </tr>
                                             ))}
                                             {recentTransactions.length === 0 && !loading && (
@@ -886,6 +1195,159 @@ export default function AdminDashboard() {
                                             )}
                                         </tbody>
                                     </table>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'balance' && (
+                        <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-2xl font-black text-fila-dark uppercase tracking-tight">Resumen de Tesorería</h3>
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        onClick={() => handleExport('csv')}
+                                        disabled={isExporting}
+                                        className="px-4 py-2.5 bg-white border border-gray-200 text-fila-dark rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-50 transition-all flex items-center gap-2 shadow-sm disabled:opacity-50"
+                                    >
+                                        <Info size={14} className="text-fila-gold" />
+                                        Excel / CSV
+                                    </button>
+                                    <button
+                                        onClick={() => handleExport('pdf')}
+                                        disabled={isExporting}
+                                        className="px-4 py-2.5 bg-white border border-gray-200 text-fila-dark rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-gray-50 transition-all flex items-center gap-2 shadow-sm disabled:opacity-50"
+                                    >
+                                        <FileText size={14} className="text-fila-gold" />
+                                        PDF
+                                    </button>
+                                    <button
+                                        onClick={() => setIsGastoModalOpen(true)}
+                                        className="px-6 py-3 bg-red-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-red-700 transition-all flex items-center gap-2 shadow-lg shadow-red-100 ml-2"
+                                    >
+                                        <Trash2 size={16} />
+                                        Registrar Gasto
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Main Balance Cards */}
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm">
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2">Total Ingresos</p>
+                                    <p className="text-4xl font-black text-green-600 tracking-tighter">+{(balanceData.totalIngresos ?? 0).toFixed(2)}€</p>
+                                    <div className="mt-4 pt-4 border-t border-gray-50">
+                                        <p className="text-[9px] font-bold text-gray-400 uppercase">Cobros completados</p>
+                                    </div>
+                                </div>
+                                <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm">
+                                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em] mb-2">Total Gastos</p>
+                                    <p className="text-4xl font-black text-red-600 tracking-tighter">-{(balanceData.totalGastos ?? 0).toFixed(2)}€</p>
+                                    <div className="mt-4 pt-4 border-t border-gray-50">
+                                        <p className="text-[9px] font-bold text-gray-400 uppercase">Pagos realizados por la Filà</p>
+                                    </div>
+                                </div>
+                                <div className={`p-8 rounded-[40px] border shadow-xl ${balanceData.balance >= 0 ? 'bg-fila-dark border-fila-dark text-white shadow-fila-dark/20' : 'bg-red-50 border-red-100 text-red-700 shadow-red-100'}`}>
+                                    <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-2 opacity-60">Balance Neto</p>
+                                    <p className="text-4xl font-black tracking-tighter">{(balanceData.balance ?? 0).toFixed(2)}€</p>
+                                    <div className="mt-4 pt-4 border-t border-white/10">
+                                        <p className="text-[9px] font-bold uppercase opacity-60">Estado de las arcas</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Breakdown Grid */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm">
+                                    <h4 className="text-lg font-black text-fila-dark uppercase tracking-tight mb-6 flex items-center gap-2">
+                                        <div className="w-2 h-8 bg-fila-gold rounded-full" />
+                                        Desglose de Ingresos
+                                    </h4>
+                                    <div className="space-y-6">
+                                        {[
+                                            { id: 'Cuota', label: 'Cuotas de Socios', color: 'bg-emerald-500', icon: UserCheck },
+                                            { id: 'Lotería', label: 'Loterías (Donativo)', color: 'bg-amber-500', icon: Ticket },
+                                            { id: 'Evento', label: 'Festejos / Actos', color: 'bg-indigo-500', icon: Star },
+                                            { id: 'Marketing', label: 'Marketing / Merch', color: 'bg-blue-500', icon: Info },
+                                            { id: 'Otros', label: 'Otros Conceptos', color: 'bg-gray-400', icon: Euro },
+                                        ].map((category, i) => {
+                                            const subs = balanceData.desgloseIngresos[category.id] || {};
+                                            const total = Object.values(subs).reduce((a, b) => a + b, 0);
+
+                                            if (total === 0) return null;
+
+                                            return (
+                                                <div key={i} className="bg-gray-50/20 rounded-[32px] border border-gray-100/50 overflow-hidden">
+                                                    <div className="flex items-center justify-between p-4 bg-gray-50/40">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className={`w-10 h-10 rounded-2xl ${category.color} text-white flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform`}>
+                                                                <category.icon size={18} />
+                                                            </div>
+                                                            <div>
+                                                                <p className="text-sm font-black text-fila-dark uppercase tracking-tight">{category.label}</p>
+                                                            </div>
+                                                        </div>
+                                                        <p className="text-lg font-black text-fila-dark">{total.toFixed(2)}€</p>
+                                                    </div>
+                                                    <div className="px-5 pb-4 pt-2 space-y-2">
+                                                        {Object.entries(subs).sort((a, b) => b[1] - a[1]).map(([subName, subAmount], j) => (
+                                                            <div key={j} className="flex justify-between items-center pl-14 pr-2">
+                                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{subName}</p>
+                                                                <p className="text-[10px] font-black text-fila-dark">{subAmount.toFixed(2)}€</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm">
+                                    <h4 className="text-lg font-black text-fila-dark uppercase tracking-tight mb-6 flex items-center gap-2">
+                                        <div className="w-2 h-8 bg-red-500 rounded-full" />
+                                        Desglose de Gastos
+                                    </h4>
+                                    <div className="space-y-6">
+                                        {[
+                                            { id: 'Local Social', label: 'Local Social', icon: Shield },
+                                            { id: 'Celebraciones', label: 'Celebraciones', icon: Calendar },
+                                            { id: 'Bandas Música', label: 'Bandas Música', icon: Users },
+                                            { id: 'Gastos Corrientes', label: 'Gastos Corrientes', icon: Info },
+                                            { id: 'Comida Fiestas', label: 'Comida Fiestas', icon: Info },
+                                            { id: 'Bebida Fiestas', label: 'Bebida Fiestas', icon: Info },
+                                            { id: 'Aniversario', label: 'Aniversario', icon: Star },
+                                            { id: 'Marketing', label: 'Marketing', icon: Info },
+                                            { id: 'Gasto', label: 'Otros Gastos', icon: Trash2 },
+                                        ].map((category, i) => {
+                                            const subs = balanceData.desgloseGastos[category.id] || {};
+                                            const total = Object.values(subs).reduce((a, b) => a + b, 0);
+
+                                            if (total === 0) return null;
+
+                                            return (
+                                                <div key={i} className="bg-red-50/20 rounded-[32px] border border-red-100/50 overflow-hidden">
+                                                    <div className="flex items-center justify-between p-4 bg-red-50/40">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-8 h-8 rounded-xl bg-red-100 text-red-600 flex items-center justify-center">
+                                                                <category.icon size={14} />
+                                                            </div>
+                                                            <p className="text-xs font-black text-fila-dark uppercase tracking-tight">{category.label}</p>
+                                                        </div>
+                                                        <p className="text-sm font-black text-red-600">{total.toFixed(2)}€</p>
+                                                    </div>
+                                                    <div className="px-4 pb-4 pt-2 space-y-2">
+                                                        {Object.entries(subs).sort((a, b) => b[1] - a[1]).map(([subName, subAmount], j) => (
+                                                            <div key={j} className="flex justify-between items-center pl-11 pr-2">
+                                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{subName}</p>
+                                                                <p className="text-[10px] font-black text-gray-600">{subAmount.toFixed(2)}€</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1029,6 +1491,98 @@ export default function AdminDashboard() {
                                     >
                                         {loading ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
                                         CREAR SOCIO
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                )}
+                {/* Create Gasto Modal */}
+                {isGastoModalOpen && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                        <div className="bg-white w-full max-w-lg rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300">
+                            <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-red-600 text-white">
+                                <div>
+                                    <h2 className="text-2xl font-black tracking-tighter uppercase leading-none mb-1">Registrar Gasto</h2>
+                                    <p className="text-[10px] text-white/60 font-black uppercase tracking-[0.2em]">Salida de caja de la Filà</p>
+                                </div>
+                                <button onClick={() => setIsGastoModalOpen(false)} className="p-2 hover:bg-white/10 rounded-full transition-all">
+                                    <X size={24} />
+                                </button>
+                            </div>
+                            <form onSubmit={handleCreateGasto} className="p-10 space-y-6">
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Concepto del Gasto</label>
+                                    <input
+                                        required
+                                        value={gastoForm.concepto}
+                                        onChange={e => setGastoForm({ ...gastoForm, concepto: e.target.value })}
+                                        className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-red-500 outline-none font-bold"
+                                        placeholder="Ej: Pago banda de música, flores..."
+                                    />
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Categoría (Epígrafe)</label>
+                                        <select
+                                            required
+                                            value={gastoForm.categoria}
+                                            onChange={e => setGastoForm({ ...gastoForm, categoria: e.target.value, subcategoria: subcategoriasMap[e.target.value]?.[0] || '' })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-red-500 outline-none font-bold bg-white"
+                                        >
+                                            {Object.keys(subcategoriasMap).map(cat => (
+                                                <option key={cat} value={cat}>{cat}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Subcategoría</label>
+                                        <select
+                                            required
+                                            value={gastoForm.subcategoria}
+                                            onChange={e => setGastoForm({ ...gastoForm, subcategoria: e.target.value })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-red-500 outline-none font-bold bg-white"
+                                        >
+                                            <option value="" disabled>Seleccionar...</option>
+                                            {(subcategoriasMap[gastoForm.categoria] || []).map(sub => (
+                                                <option key={sub} value={sub}>{sub}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Importe (€)</label>
+                                    <div className="relative">
+                                        <input
+                                            required
+                                            type="text"
+                                            value={gastoForm.monto}
+                                            onChange={e => setGastoForm({ ...gastoForm, monto: e.target.value })}
+                                            className="w-full px-5 py-4 rounded-2xl border border-gray-200 focus:border-red-500 outline-none font-black text-2xl text-red-600"
+                                            placeholder="0,00"
+                                        />
+                                        <span className="absolute right-5 top-1/2 -translate-y-1/2 text-xl font-black text-gray-300">€</span>
+                                    </div>
+                                </div>
+
+                                <div className="pt-4 flex gap-4">
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsGastoModalOpen(false)}
+                                        className="flex-1 px-4 py-4 rounded-2xl border border-gray-200 font-bold text-gray-500 hover:bg-gray-50 transition-all text-sm"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={loading}
+                                        className="flex-[2] px-4 py-4 rounded-2xl bg-red-600 text-white font-black hover:bg-red-700 transition-all shadow-xl shadow-red-200 flex items-center justify-center gap-2 text-sm tracking-widest uppercase"
+                                    >
+                                        {loading ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                                        GUARDAR GASTO
                                     </button>
                                 </div>
                             </form>
@@ -1329,5 +1883,18 @@ export default function AdminDashboard() {
                 )}
             </div>
         </main>
+    );
+}
+
+export default function AdminDashboard() {
+    return (
+        <Suspense fallback={
+            <div className="min-h-screen flex flex-col items-center justify-center bg-fila-light">
+                <Loader2 className="w-12 h-12 text-fila-gold animate-spin mb-4" />
+                <p className="text-fila-dark font-bold">Cargando panel de administración...</p>
+            </div>
+        }>
+            <AdminDashboardContent />
+        </Suspense>
     );
 }

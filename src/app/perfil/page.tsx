@@ -7,8 +7,6 @@ import { User, Mail, Phone, Calendar, LogOut, Loader2, Award, ShieldCheck, Euro,
 import Link from 'next/link';
 import { Navbar } from '@/components/Navbar';
 import { useRouter } from 'next/navigation';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 interface SocioData {
     id: string;
@@ -24,17 +22,6 @@ interface SocioData {
 interface Quota {
     nombre: string;
     monto: number;
-}
-
-interface Transaction {
-    id: string;
-    tipo: 'cobro' | 'pago';
-    monto: number;
-    concepto: string;
-    categoria: string;
-    fecha: string;
-    estado: 'pendiente' | 'completado' | 'cancelado';
-    metodo_pago?: string;
 }
 
 interface Evento {
@@ -68,7 +55,6 @@ interface InscritoInfo {
 export default function PerfilPage() {
     const [socio, setSocio] = useState<SocioData | null>(null);
     const [quota, setQuota] = useState<Quota | null>(null);
-    const [transactions, setTransactions] = useState<Transaction[]>([]);
     const [eventos, setEventos] = useState<Evento[]>([]);
     const [misInscripciones, setMisInscripciones] = useState<string[]>([]);
     const [isAdmin, setIsAdmin] = useState(false);
@@ -140,15 +126,6 @@ export default function PerfilPage() {
                         .single();
                     if (qData) setQuota(qData);
                 }
-
-                // Fetch Transactions
-                const { data: tData } = await supabase
-                    .from('pagos_cobros')
-                    .select('*')
-                    .eq('socio_id', data.id)
-                    .order('categoria', { ascending: true })
-                    .order('fecha', { ascending: false });
-                if (tData) setTransactions(tData);
 
                 // Fetch Events
                 const { data: eData } = await supabase
@@ -275,22 +252,10 @@ export default function PerfilPage() {
             }]);
 
         if (!error) {
-            // El cargo se genera automáticamente mediante un Trigger en la base de datos (con parent_id)
+            // El cargo se genera automáticamente mediante un Trigger en la base de datos
             setMisInscripciones([...misInscripciones, registeringEvento.id]);
             setRegisteringEvento(null);
             setRegistrationForm({ grupo: '', numero_invitados: '0' });
-
-            // Refrescamos las transacciones tras un pequeño delay para que el trigger termine
-            setTimeout(async () => {
-                if (!socio) return;
-                const { data: tData } = await supabase
-                    .from('pagos_cobros')
-                    .select('*')
-                    .eq('socio_id', socio.id)
-                    .order('categoria', { ascending: true })
-                    .order('fecha', { ascending: false });
-                if (tData) setTransactions(tData);
-            }, 800);
 
             setStatusMsg({ type: 'success', text: '¡Inscripción confirmada!' });
             setTimeout(() => setStatusMsg(null), 4000);
@@ -317,17 +282,6 @@ export default function PerfilPage() {
 
         if (!error) {
             setMisInscripciones(misInscripciones.filter(id => id !== eventoId));
-
-            setTimeout(async () => {
-                if (!socio) return;
-                const { data: tData } = await supabase
-                    .from('pagos_cobros')
-                    .select('*')
-                    .eq('socio_id', socio.id)
-                    .order('categoria', { ascending: true })
-                    .order('fecha', { ascending: false });
-                if (tData) setTransactions(tData);
-            }, 800);
 
             setStatusMsg({ type: 'success', text: 'Inscripción cancelada.' });
             setTimeout(() => setStatusMsg(null), 3000);
@@ -362,136 +316,7 @@ export default function PerfilPage() {
         setLoadingInscritos(false);
     };
 
-    const generatePDF = () => {
-        if (!socio) return;
 
-        const doc = new jsPDF();
-        const fullName = `${socio.nombre} ${socio.primer_apellido} ${socio.segundo_apellido || ''}`.trim();
-        const date = new Date().toLocaleDateString('es-ES');
-
-        // Header
-        doc.setFontSize(22);
-        doc.setTextColor(184, 153, 76); // fila-gold
-        doc.text('FILÀ MOROS DEL CASTELL', 105, 20, { align: 'center' });
-
-        doc.setFontSize(14);
-        doc.setTextColor(33, 37, 41); // fila-dark
-        doc.text('EXTRACTO DE MOVIMIENTOS', 105, 30, { align: 'center' });
-
-        doc.setFontSize(10);
-        doc.setTextColor(100);
-        doc.text(`Socio: ${fullName}`, 20, 45);
-        doc.text(`Fecha: ${date}`, 20, 50);
-
-        let finalY = 60;
-
-        // Group transactions by category and sub-group
-        const categories = Array.from(new Set(transactions.map(t => t.categoria || 'Varios')));
-
-        const getSubGroupName = (concepto: string, categoria: string) => {
-            let name = String(concepto || '');
-            let previousName;
-            do {
-                previousName = name;
-                name = name.replace(/^Abono parcial:\s*/i, '');
-                name = name.replace(/^Inscripción Evento:\s*/i, '');
-                name = name.replace(/^Lotería:\s*/i, '');
-            } while (name !== previousName);
-
-            if (categoria === 'Evento' || categoria === 'Lotería') {
-                return name.split('(')[0].trim() || (categoria === 'Evento' ? 'Otros Eventos' : 'Otros Sorteos');
-            }
-            return categoria || 'Varios';
-        };
-
-        categories.forEach(cat => {
-            const catTransactions = transactions.filter(t => (t.categoria || 'Varios') === cat);
-            const subGroups = Array.from(new Set(catTransactions.map(t => getSubGroupName(t.concepto, t.categoria || 'Varios'))));
-
-            doc.setFontSize(14);
-            doc.setTextColor(184, 153, 76);
-            doc.text(cat.toUpperCase(), 20, finalY);
-            finalY += 10;
-
-            subGroups.forEach(subG => {
-                const subTransactions = catTransactions.filter(t => getSubGroupName(t.concepto, t.categoria || 'Varios') === subG);
-                const subTotalCobro = subTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
-                const subTotalPago = subTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
-                const subPendiente = Math.max(0, subTotalCobro - subTotalPago);
-
-                doc.setFontSize(11);
-                doc.setTextColor(33, 37, 41);
-                doc.text(subG, 25, finalY);
-
-                if (subPendiente > 0) {
-                    doc.setFontSize(9);
-                    doc.setTextColor(255, 0, 0);
-                    doc.text(`(Pendiente: ${subPendiente.toFixed(2)}€)`, 190, finalY, { align: 'right' });
-                }
-
-                const tableData = subTransactions.map(t => [
-                    new Date(t.fecha).toLocaleDateString('es-ES'),
-                    t.concepto,
-                    t.metodo_pago || (t.tipo === 'cobro' ? '-' : '---'),
-                    t.estado === 'completado' ? 'LIQUIDADO' : t.estado.toUpperCase(),
-                    `${t.tipo === 'pago' ? '-' : '+'}${Number(t.monto).toFixed(2)}€`
-                ]);
-
-                autoTable(doc, {
-                    startY: finalY + 2,
-                    head: [['Fecha', 'Concepto', 'Método', 'Estado', 'Monto']],
-                    body: tableData,
-                    theme: 'grid',
-                    headStyles: { fillColor: [26, 26, 26], textColor: [184, 153, 76], fontStyle: 'bold' },
-                    styles: { fontSize: 8, cellPadding: 2 },
-                    margin: { left: 25 },
-                    columnStyles: {
-                        4: { halign: 'right', fontStyle: 'bold' }
-                    }
-                });
-
-                finalY = (doc as any).lastAutoTable.finalY + 10;
-
-                if (finalY > 260) {
-                    doc.addPage();
-                    finalY = 20;
-                }
-            });
-
-            finalY += 5;
-        });
-
-        // Totals summary
-        const totalCobrado = transactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
-        const totalPagado = transactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
-        const totalPendiente = Math.max(0, totalCobrado - totalPagado);
-
-        doc.setFontSize(12);
-        doc.setTextColor(33, 37, 41);
-        doc.text('RESUMEN GENERAL DE CUENTA', 20, finalY + 5);
-
-        autoTable(doc, {
-            startY: finalY + 10,
-            body: [
-                ['Total ya abonado:', `${totalPagado.toFixed(2)}€`],
-                ['Saldo total pendiente:', `${totalPendiente.toFixed(2)}€`]
-            ],
-            theme: 'plain',
-            styles: { fontSize: 10, fontStyle: 'bold' },
-            columnStyles: {
-                0: { cellWidth: 100 },
-                1: { halign: 'right' }
-            },
-            didParseCell: (data) => {
-                if (data.column.index === 1) {
-                    if (data.row.index === 0) data.cell.styles.textColor = [34, 197, 94]; // Green for paid
-                    if (data.row.index === 1) data.cell.styles.textColor = [255, 0, 0]; // Red for debt
-                }
-            }
-        });
-
-        doc.save(`Extracto_Castell_${fullName.replace(/\s+/g, '_')}.pdf`);
-    };
 
     const handleSignOut = async () => {
         await supabase.auth.signOut();
@@ -613,6 +438,29 @@ export default function PerfilPage() {
                             </div>
 
                         </div>
+
+                        {/* History Shortcut */}
+                        <div className="mt-8 p-6 bg-fila-dark rounded-3xl border border-fila-gold/20 flex flex-col md:flex-row items-center justify-between gap-6 shadow-xl">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 rounded-2xl bg-fila-gold flex items-center justify-center text-white shadow-lg overflow-hidden relative">
+                                    <div className="absolute inset-0 opacity-20 transform rotate-12 scale-150">
+                                        <Euro size={30} />
+                                    </div>
+                                    <Euro size={20} className="relative z-10" />
+                                </div>
+                                <div>
+                                    <h4 className="text-white font-black uppercase tracking-tight text-lg">Mis Cobros y Pagos</h4>
+                                    <p className="text-fila-gold/60 text-[10px] font-black uppercase tracking-widest leading-none mt-1">Consulta tus movimientos y deudas</p>
+                                </div>
+                            </div>
+                            <Link
+                                href="/perfil/historial"
+                                className="w-full md:w-auto bg-fila-gold hover:bg-white text-white hover:text-fila-dark px-10 py-4 rounded-2xl text-[10px] font-black tracking-widest uppercase transition-all shadow-lg shadow-fila-gold/20 flex items-center justify-center gap-2 group"
+                            >
+                                <FileText size={16} className="group-hover:scale-110 transition-transform" />
+                                Ver Mis Cobros y Pagos
+                            </Link>
+                        </div>
                     </div>
                 </div>
 
@@ -691,142 +539,7 @@ export default function PerfilPage() {
                     </div>
                 </div>
 
-                {/* History Panel */}
-                <div className="mt-12 bg-white rounded-[40px] shadow-2xl border border-fila-gold/10 overflow-hidden">
-                    <div className="p-8 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-fila-dark flex items-center justify-center text-white">
-                                <Euro size={18} />
-                            </div>
-                            <h3 className="text-xl font-black text-fila-dark tracking-tighter uppercase">Historial de Cobros y Pagos</h3>
-                        </div>
-                        <button
-                            onClick={generatePDF}
-                            disabled={transactions.length === 0}
-                            className="flex items-center gap-2 bg-fila-gold hover:bg-fila-gold/90 text-white px-5 py-2.5 rounded-2xl text-[10px] font-black tracking-widest uppercase transition-all shadow-lg shadow-fila-gold/20 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            <FileText size={16} />
-                            <span>Descargar Extracto PDF</span>
-                        </button>
-                    </div>
 
-                    <div className="divide-y divide-gray-100">
-                        {transactions.length > 0 ? (
-                            Array.from(new Set(transactions.map(t => t.categoria || 'Varios'))).map(cat => {
-                                const catTransactions = transactions.filter(t => (t.categoria || 'Varios') === cat);
-
-                                const getSubGroupName = (concepto: string, categoria: string) => {
-                                    let name = String(concepto || '');
-                                    let previousName;
-                                    do {
-                                        previousName = name;
-                                        name = name.replace(/^Abono parcial:\s*/i, '');
-                                        name = name.replace(/^Inscripción Evento:\s*/i, '');
-                                        name = name.replace(/^Lotería:\s*/i, '');
-                                    } while (name !== previousName);
-
-                                    if (categoria === 'Evento' || categoria === 'Lotería') {
-                                        return name.split('(')[0].trim() || (categoria === 'Evento' ? 'Otros Eventos' : 'Otros Sorteos');
-                                    }
-                                    return null; // Don't sub-group others (Cuotas)
-                                };
-
-                                const subGroups = Array.from(new Set(catTransactions.map(t => getSubGroupName(t.concepto, t.categoria || 'Varios'))));
-
-                                return (
-                                    <div key={cat} className="animate-in fade-in duration-500">
-                                        <div className="px-8 py-3 bg-fila-light/30 border-y border-gray-100/50 flex justify-between items-center">
-                                            <h4 className="text-[10px] font-black text-fila-gold uppercase tracking-[0.2em]">{cat}</h4>
-                                        </div>
-                                        <div className="divide-y divide-gray-100">
-                                            {subGroups.map(subG => {
-                                                const subTransactions = catTransactions.filter(t => getSubGroupName(t.concepto, t.categoria || 'Varios') === subG);
-                                                const subTotalCobro = subTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
-                                                const subTotalPago = subTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
-                                                const subPendiente = Math.max(0, subTotalCobro - subTotalPago);
-
-                                                return (
-                                                    <div key={subG || 'root'} className="bg-white">
-                                                        {subG && (
-                                                            <div className="px-10 py-2 flex justify-between items-center border-b border-gray-50 bg-gray-50/20">
-                                                                <span className="text-[9px] font-bold text-fila-dark uppercase tracking-widest">{subG}</span>
-                                                                {subPendiente > 0 && (
-                                                                    <span className="text-[8px] font-black text-red-500 uppercase tracking-widest">
-                                                                        Pendiente: {subPendiente.toFixed(2)}€
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        )}
-                                                        <div className="divide-y divide-gray-50">
-                                                            {subTransactions.map((t) => (
-                                                                <div key={t.id} className="p-6 hover:bg-fila-light/20 transition-all flex items-center justify-between gap-4">
-                                                                    <div className="flex items-center gap-4">
-                                                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.tipo === 'pago' ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600'}`}>
-                                                                            <Euro size={16} />
-                                                                        </div>
-                                                                        <div>
-                                                                            <p className="font-bold text-fila-dark text-sm">{t.concepto}</p>
-                                                                            <p className="text-[10px] text-gray-400 flex items-center gap-2">
-                                                                                {new Date(t.fecha).toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}
-                                                                                {t.tipo === 'pago' && t.metodo_pago && (
-                                                                                    <>
-                                                                                        <span className="w-1 h-1 rounded-full bg-gray-300"></span>
-                                                                                        <span className="text-fila-gold font-black uppercase text-[8px] tracking-widest">{t.metodo_pago}</span>
-                                                                                    </>
-                                                                                )}
-                                                                            </p>
-                                                                        </div>
-                                                                    </div>
-                                                                    <div className="text-right">
-                                                                        <p className={`font-black text-base ${t.tipo === 'pago' ? 'text-green-600' : 'text-fila-dark'}`}>
-                                                                            {t.tipo === 'pago' ? '-' : '+'}{Number(t.monto).toFixed(2)}€
-                                                                        </p>
-                                                                        <span className={`text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-full ${t.estado === 'completado' ? 'bg-green-50 text-green-600' :
-                                                                            t.estado === 'pendiente' ? 'bg-orange-50 text-orange-600' :
-                                                                                'bg-gray-50 text-gray-400'
-                                                                            }`}>
-                                                                            {t.estado}
-                                                                        </span>
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                );
-                            })
-                        ) : (
-                            <div className="p-12 text-center">
-                                <p className="text-gray-400 font-medium italic">No hay movimientos registrados.</p>
-                            </div>
-                        )}
-                        {transactions.length > 0 && (
-                            <div className="p-8 bg-fila-dark text-white flex flex-col md:flex-row justify-between items-center gap-4">
-                                <div className="text-center md:text-left">
-                                    <p className="text-[10px] font-black text-fila-gold uppercase tracking-[0.2em] mb-1">Resumen General</p>
-                                    <h4 className="text-lg font-black tracking-tighter uppercase">Estado de cuenta del socio</h4>
-                                </div>
-                                <div className="flex gap-8">
-                                    <div className="text-right">
-                                        <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none mb-1">Total Pagado</p>
-                                        <p className="text-xl font-black text-green-400">
-                                            {transactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0).toFixed(2)}€
-                                        </p>
-                                    </div>
-                                    <div className="text-right">
-                                        <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none mb-1">Deuda Pendiente</p>
-                                        <p className="text-xl font-black text-red-400">
-                                            {Math.max(0, transactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0) - transactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0)).toFixed(2)}€
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                </div>
 
                 {/* Registration Modal */}
                 {registeringEvento && (

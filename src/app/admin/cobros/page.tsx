@@ -817,7 +817,13 @@ export default function CobrosAdmin() {
                                                             </div>
                                                             <div>
                                                                 <div className="flex items-center gap-2">
-                                                                    <h4 className="font-black text-fila-dark uppercase tracking-tight">{name}</h4>
+                                                                    <Link
+                                                                        href={`/admin?search=${name}`}
+                                                                        className="font-black text-fila-dark uppercase tracking-tight hover:text-fila-gold transition-colors cursor-pointer"
+                                                                        title="Ver perfil del socio"
+                                                                    >
+                                                                        {name}
+                                                                    </Link>
                                                                     {cargo?.is_automatic && (
                                                                         <div title="Generado automáticamente" className="flex items-center gap-1 px-1.5 py-0.5 bg-blue-50 text-blue-500 rounded-lg">
                                                                             <Shield size={10} className="fill-blue-500" />

@@ -10,10 +10,11 @@ import {
     Calendar,
     ArrowLeft,
     LogOut,
-    Loader2
+    Loader2,
+    LayoutDashboard
 } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter, usePathname } from 'next/navigation';
+import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 
 interface AdminSidebarProps {
@@ -22,6 +23,7 @@ interface AdminSidebarProps {
 }
 
 export function AdminSidebar({ isMenuOpen, setIsMenuOpen }: AdminSidebarProps) {
+    const searchParams = useSearchParams();
     const [adminData, setAdminData] = useState<{ nombre: string; apellidos: string } | null>(null);
     const [loading, setLoading] = useState(true);
     const router = useRouter();
@@ -51,12 +53,23 @@ export function AdminSidebar({ isMenuOpen, setIsMenuOpen }: AdminSidebarProps) {
     }, []);
 
     const NavItem = ({ href, icon: Icon, label }: { href: string; icon: any; label: string }) => {
-        const isActive = pathname === href;
+        const isActive = pathname === href || (href.includes('?tab=') && pathname + searchParams.toString() === href.replace('?', ''));
+        // Simplified active check for query params
+        const isLinkActive = () => {
+            if (href.includes('tab=balance')) {
+                return searchParams.get('tab') === 'balance';
+            }
+            if (href === '/admin' && !searchParams.get('tab')) {
+                return pathname === '/admin';
+            }
+            return pathname === href;
+        };
+
         return (
             <Link
                 href={href}
                 onClick={() => setIsMenuOpen(false)}
-                className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${isActive ? 'bg-fila-gold text-white shadow-lg shadow-fila-gold/20' : 'text-gray-500 hover:bg-fila-light hover:text-fila-dark'}`}
+                className={`flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all ${isLinkActive() ? 'bg-fila-gold text-white shadow-lg shadow-fila-gold/20' : 'text-gray-500 hover:bg-fila-light hover:text-fila-dark'}`}
             >
                 <Icon size={20} />
                 <span>{label}</span>
@@ -112,6 +125,7 @@ export function AdminSidebar({ isMenuOpen, setIsMenuOpen }: AdminSidebarProps) {
                         <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
                         <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
                         <NavItem href="/admin/banco" icon={Euro} label="Punteo Bancario" />
+                        <NavItem href="/admin?tab=balance" icon={LayoutDashboard} label="Balance Financiero" />
                     </nav>
 
                     {/* User Profile Section - Now integrated below the menu */}
