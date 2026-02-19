@@ -15,6 +15,20 @@ interface Quota {
     nombre: string;
     monto: number;
     descripcion: string | null;
+    epigrafe_id?: string;
+    subepigrafe_id?: string;
+}
+
+interface Epigrafe {
+    id: string;
+    nombre: string;
+    tipo: string;
+}
+
+interface Subepigrafe {
+    id: string;
+    nombre: string;
+    epigrafe_id: string;
 }
 
 export default function QuotasAdmin() {
@@ -28,8 +42,12 @@ export default function QuotasAdmin() {
     const [formData, setFormData] = useState({
         nombre: '',
         monto: '',
-        descripcion: ''
+        descripcion: '',
+        epigrafe_id: '',
+        subepigrafe_id: ''
     });
+    const [epigrafes, setEpigrafes] = useState<Epigrafe[]>([]);
+    const [subepigrafes, setSubepigrafes] = useState<Subepigrafe[]>([]);
 
     // Details Modal State
     const [selectedQuotaForDetails, setSelectedQuotaForDetails] = useState<Quota | null>(null);
@@ -64,6 +82,14 @@ export default function QuotasAdmin() {
 
         setIsAdmin(true);
         fetchQuotas();
+        fetchConfig();
+    };
+
+    const fetchConfig = async () => {
+        const { data: epData } = await supabase.from('config_epigrafes').select('*').order('nombre');
+        const { data: subData } = await supabase.from('config_subepigrafes').select('*').order('nombre');
+        if (epData) setEpigrafes(epData);
+        if (subData) setSubepigrafes(subData);
     };
 
     const fetchQuotas = async () => {
@@ -83,11 +109,13 @@ export default function QuotasAdmin() {
             setFormData({
                 nombre: quota.nombre,
                 monto: quota.monto.toString(),
-                descripcion: quota.descripcion || ''
+                descripcion: quota.descripcion || '',
+                epigrafe_id: quota.epigrafe_id || '',
+                subepigrafe_id: quota.subepigrafe_id || ''
             });
         } else {
             setEditingQuota(null);
-            setFormData({ nombre: '', monto: '', descripcion: '' });
+            setFormData({ nombre: '', monto: '', descripcion: '', epigrafe_id: '', subepigrafe_id: '' });
         }
         setIsModalOpen(true);
     };
@@ -99,7 +127,9 @@ export default function QuotasAdmin() {
         const quotaData = {
             nombre: formData.nombre,
             monto: parseFloat(formData.monto),
-            descripcion: formData.descripcion
+            descripcion: formData.descripcion,
+            epigrafe_id: formData.epigrafe_id || null,
+            subepigrafe_id: formData.subepigrafe_id || null
         };
 
         let error;
@@ -370,6 +400,37 @@ export default function QuotasAdmin() {
                                         onChange={e => setFormData({ ...formData, descripcion: e.target.value })}
                                         className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all resize-none font-medium"
                                     />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Relacionar con Epígrafe</label>
+                                        <select
+                                            value={formData.epigrafe_id}
+                                            onChange={e => setFormData({ ...formData, epigrafe_id: e.target.value, subepigrafe_id: '' })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold text-xs"
+                                        >
+                                            <option value="">Ninguno</option>
+                                            {epigrafes.map(ep => (
+                                                <option key={ep.id} value={ep.id}>{ep.nombre} ({ep.tipo})</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Subcategoría</label>
+                                        <select
+                                            value={formData.subepigrafe_id}
+                                            onChange={e => setFormData({ ...formData, subepigrafe_id: e.target.value })}
+                                            disabled={!formData.epigrafe_id}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold text-xs disabled:opacity-50"
+                                        >
+                                            <option value="">Ninguna</option>
+                                            {subepigrafes
+                                                .filter(s => s.epigrafe_id === formData.epigrafe_id)
+                                                .map(sub => (
+                                                    <option key={sub.id} value={sub.id}>{sub.nombre}</option>
+                                                ))}
+                                        </select>
+                                    </div>
                                 </div>
                                 <div className="pt-4 flex gap-4">
                                     <button

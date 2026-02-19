@@ -18,6 +18,20 @@ interface Sorteo {
     numero: string | null;
     tipo: 'mensual' | 'navidad' | 'el_niño';
     created_at: string;
+    epigrafe_id?: string;
+    subepigrafe_id?: string;
+}
+
+interface Epigrafe {
+    id: string;
+    nombre: string;
+    tipo: string;
+}
+
+interface Subepigrafe {
+    id: string;
+    nombre: string;
+    epigrafe_id: string;
 }
 
 export default function LoteriaAdmin() {
@@ -38,8 +52,12 @@ export default function LoteriaAdmin() {
         recargo: '',
         serie: '',
         numero: '',
-        tipo: 'mensual' as 'mensual' | 'navidad' | 'el_niño'
+        tipo: 'mensual' as 'mensual' | 'navidad' | 'el_niño',
+        epigrafe_id: '',
+        subepigrafe_id: ''
     });
+    const [epigrafes, setEpigrafes] = useState<Epigrafe[]>([]);
+    const [subepigrafes, setSubepigrafes] = useState<Subepigrafe[]>([]);
 
     const router = useRouter();
     const pathname = usePathname();
@@ -68,6 +86,14 @@ export default function LoteriaAdmin() {
 
         setIsAdmin(true);
         fetchSorteos();
+        fetchConfig();
+    };
+
+    const fetchConfig = async () => {
+        const { data: epData } = await supabase.from('config_epigrafes').select('*').order('nombre');
+        const { data: subData } = await supabase.from('config_subepigrafes').select('*').order('nombre');
+        if (epData) setEpigrafes(epData);
+        if (subData) setSubepigrafes(subData);
     };
 
     const fetchSorteos = async () => {
@@ -90,11 +116,13 @@ export default function LoteriaAdmin() {
                 recargo: sorteo.recargo.toString(),
                 serie: sorteo.serie || '',
                 numero: sorteo.numero || '',
-                tipo: sorteo.tipo
+                tipo: sorteo.tipo,
+                epigrafe_id: sorteo.epigrafe_id || '',
+                subepigrafe_id: sorteo.subepigrafe_id || ''
             });
         } else {
             setEditingSorteo(null);
-            setFormData({ descripcion: '', precio: '20', recargo: '3', serie: '', numero: '', tipo: 'mensual' });
+            setFormData({ descripcion: '', precio: '20', recargo: '3', serie: '', numero: '', tipo: 'mensual', epigrafe_id: '', subepigrafe_id: '' });
         }
         setIsModalOpen(true);
     };
@@ -109,7 +137,9 @@ export default function LoteriaAdmin() {
             recargo: parseFloat(formData.recargo),
             serie: formData.serie || null,
             numero: formData.numero || null,
-            tipo: formData.tipo
+            tipo: formData.tipo,
+            epigrafe_id: formData.epigrafe_id || null,
+            subepigrafe_id: formData.subepigrafe_id || null
         };
 
         if (editingSorteo) {
@@ -174,7 +204,9 @@ export default function LoteriaAdmin() {
                             monto: montoTotal,
                             concepto: `Lotería: ${sorteo.descripcion} (${cantidad} décimos)`,
                             categoria: 'Lotería',
-                            estado: 'pendiente'
+                            estado: 'pendiente',
+                            epigrafe_id: sorteo.epigrafe_id,
+                            subepigrafe_id: sorteo.subepigrafe_id
                         });
 
                         bulkAsignaciones.push({
@@ -550,6 +582,38 @@ export default function LoteriaAdmin() {
                                     <span className="text-3xl font-black">{(parseFloat(formData.precio || '0') + parseFloat(formData.recargo || '0')).toFixed(2)}€</span>
                                 </div>
 
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Relacionar con Epígrafe</label>
+                                        <select
+                                            value={formData.epigrafe_id}
+                                            onChange={e => setFormData({ ...formData, epigrafe_id: e.target.value, subepigrafe_id: '' })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold text-xs"
+                                        >
+                                            <option value="">Ninguno</option>
+                                            {epigrafes.map(ep => (
+                                                <option key={ep.id} value={ep.id}>{ep.nombre} ({ep.tipo})</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Subcategoría</label>
+                                        <select
+                                            value={formData.subepigrafe_id}
+                                            onChange={e => setFormData({ ...formData, subepigrafe_id: e.target.value })}
+                                            disabled={!formData.epigrafe_id}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold text-xs disabled:opacity-50"
+                                        >
+                                            <option value="">Ninguna</option>
+                                            {subepigrafes
+                                                .filter(s => s.epigrafe_id === formData.epigrafe_id)
+                                                .map(sub => (
+                                                    <option key={sub.id} value={sub.id}>{sub.nombre}</option>
+                                                ))}
+                                        </select>
+                                    </div>
+                                </div>
+
                                 <div className="pt-4 flex gap-4">
                                     <button
                                         type="button"
@@ -573,111 +637,113 @@ export default function LoteriaAdmin() {
                 )}
 
                 {/* View Details Modal */}
-                {viewingDetails && (
-                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
-                        <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 max-h-[80vh] flex flex-col">
-                            <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-fila-light text-fila-dark">
-                                <div>
-                                    <h2 className="text-xl font-black tracking-tighter uppercase leading-none mb-1">Detalles de Asignación</h2>
-                                    <p className="text-[10px] text-fila-gold font-black uppercase tracking-[0.2em]">{viewingDetails.descripcion}</p>
-                                </div>
-                                <div className="flex items-center gap-4">
-                                    <div className="flex items-center gap-2 bg-fila-dark/5 px-4 py-2 rounded-xl">
-                                        <Download size={16} className="text-fila-gold" />
-                                        <button
-                                            onClick={() => handleExport('csv')}
-                                            disabled={isExporting || sociosAsignados.length === 0}
-                                            className="text-[10px] font-black uppercase tracking-widest hover:text-fila-gold transition-colors disabled:opacity-50"
-                                        >
-                                            CSV
+                {
+                    viewingDetails && (
+                        <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-fila-dark/40 backdrop-blur-sm animate-in fade-in duration-300">
+                            <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 max-h-[80vh] flex flex-col">
+                                <div className="px-10 py-8 border-b border-gray-100 flex justify-between items-center bg-fila-light text-fila-dark">
+                                    <div>
+                                        <h2 className="text-xl font-black tracking-tighter uppercase leading-none mb-1">Detalles de Asignación</h2>
+                                        <p className="text-[10px] text-fila-gold font-black uppercase tracking-[0.2em]">{viewingDetails.descripcion}</p>
+                                    </div>
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-2 bg-fila-dark/5 px-4 py-2 rounded-xl">
+                                            <Download size={16} className="text-fila-gold" />
+                                            <button
+                                                onClick={() => handleExport('csv')}
+                                                disabled={isExporting || sociosAsignados.length === 0}
+                                                className="text-[10px] font-black uppercase tracking-widest hover:text-fila-gold transition-colors disabled:opacity-50"
+                                            >
+                                                CSV
+                                            </button>
+                                            <div className="w-px h-3 bg-fila-dark/10 mx-1" />
+                                            <button
+                                                onClick={() => handleExport('pdf')}
+                                                disabled={isExporting || sociosAsignados.length === 0}
+                                                className="text-[10px] font-black uppercase tracking-widest hover:text-fila-gold transition-colors disabled:opacity-50"
+                                            >
+                                                PDF
+                                            </button>
+                                            {isExporting && <Loader2 size={12} className="animate-spin text-fila-gold ml-1" />}
+                                        </div>
+                                        <button onClick={() => setViewingDetails(null)} className="p-2 hover:bg-fila-dark/10 rounded-full transition-all">
+                                            <X size={24} />
                                         </button>
-                                        <div className="w-px h-3 bg-fila-dark/10 mx-1" />
-                                        <button
-                                            onClick={() => handleExport('pdf')}
-                                            disabled={isExporting || sociosAsignados.length === 0}
-                                            className="text-[10px] font-black uppercase tracking-widest hover:text-fila-gold transition-colors disabled:opacity-50"
-                                        >
-                                            PDF
-                                        </button>
-                                        {isExporting && <Loader2 size={12} className="animate-spin text-fila-gold ml-1" />}
-                                    </div>
-                                    <button onClick={() => setViewingDetails(null)} className="p-2 hover:bg-fila-dark/10 rounded-full transition-all">
-                                        <X size={24} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="bg-fila-light/30 p-8 border-b border-gray-100">
-                                <div className="grid grid-cols-3 gap-4">
-                                    <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
-                                        <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Total Asignado</p>
-                                        <p className="text-xl font-black text-fila-dark">
-                                            {sociosAsignados.reduce((acc, s) => acc + s.total_monto, 0).toFixed(2)}€
-                                        </p>
-                                    </div>
-                                    <div className="bg-green-50 p-4 rounded-3xl shadow-sm border border-green-100">
-                                        <p className="text-[9px] font-black text-green-600/60 uppercase tracking-widest mb-1">Total Cobrado</p>
-                                        <p className="text-xl font-black text-green-600">
-                                            {sociosAsignados.reduce((acc, s) => acc + s.pagado, 0).toFixed(2)}€
-                                        </p>
-                                    </div>
-                                    <div className="bg-orange-50 p-4 rounded-3xl shadow-sm border border-orange-100">
-                                        <p className="text-[9px] font-black text-orange-600/60 uppercase tracking-widest mb-1">Total Pendiente</p>
-                                        <p className="text-xl font-black text-orange-600">
-                                            {sociosAsignados.reduce((acc, s) => acc + s.pendiente, 0).toFixed(2)}€
-                                        </p>
                                     </div>
                                 </div>
-                            </div>
 
-                            <div className="p-10 overflow-y-auto flex-1">
-                                {isDetailsLoading ? (
-                                    <div className="flex flex-col items-center justify-center py-20">
-                                        <Loader2 className="w-10 h-10 text-fila-gold animate-spin mb-4" />
-                                        <p className="text-gray-400 font-bold">Cargando asignaciones...</p>
+                                <div className="bg-fila-light/30 p-8 border-b border-gray-100">
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100">
+                                            <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-1">Total Asignado</p>
+                                            <p className="text-xl font-black text-fila-dark">
+                                                {sociosAsignados.reduce((acc, s) => acc + s.total_monto, 0).toFixed(2)}€
+                                            </p>
+                                        </div>
+                                        <div className="bg-green-50 p-4 rounded-3xl shadow-sm border border-green-100">
+                                            <p className="text-[9px] font-black text-green-600/60 uppercase tracking-widest mb-1">Total Cobrado</p>
+                                            <p className="text-xl font-black text-green-600">
+                                                {sociosAsignados.reduce((acc, s) => acc + s.pagado, 0).toFixed(2)}€
+                                            </p>
+                                        </div>
+                                        <div className="bg-orange-50 p-4 rounded-3xl shadow-sm border border-orange-100">
+                                            <p className="text-[9px] font-black text-orange-600/60 uppercase tracking-widest mb-1">Total Pendiente</p>
+                                            <p className="text-xl font-black text-orange-600">
+                                                {sociosAsignados.reduce((acc, s) => acc + s.pendiente, 0).toFixed(2)}€
+                                            </p>
+                                        </div>
                                     </div>
-                                ) : sociosAsignados.length === 0 ? (
-                                    <div className="text-center py-20 bg-gray-50 rounded-[32px] border-2 border-dashed border-gray-200">
-                                        <Ticket className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                                        <p className="text-gray-400 font-bold">Sin asignaciones registradas</p>
-                                    </div>
-                                ) : (
-                                    <table className="w-full">
-                                        <thead>
-                                            <tr className="text-left">
-                                                <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Socio</th>
-                                                <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Décimos</th>
-                                                <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Pagado</th>
-                                                <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Pendiente</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-gray-50">
-                                            {sociosAsignados.map((s) => (
-                                                <tr key={s.id} className="group hover:bg-gray-50/20 transition-colors">
-                                                    <td className="py-4 pl-4 font-bold text-fila-dark truncate max-w-[200px]">
-                                                        {s.nombre}
-                                                    </td>
-                                                    <td className="py-4 text-center">
-                                                        <span className="px-2 py-1 bg-gray-100 rounded-lg text-[10px] font-black text-gray-500">
-                                                            {s.cantidad}
-                                                        </span>
-                                                    </td>
-                                                    <td className="py-4 text-right text-sm font-black text-green-600">
-                                                        {s.pagado > 0 ? `${s.pagado.toFixed(2)}€` : '-'}
-                                                    </td>
-                                                    <td className="py-4 pr-4 text-right text-sm font-black text-orange-600">
-                                                        {s.pendiente > 0 ? `${s.pendiente.toFixed(2)}€` : 'Liquidado'}
-                                                    </td>
+                                </div>
+
+                                <div className="p-10 overflow-y-auto flex-1">
+                                    {isDetailsLoading ? (
+                                        <div className="flex flex-col items-center justify-center py-20">
+                                            <Loader2 className="w-10 h-10 text-fila-gold animate-spin mb-4" />
+                                            <p className="text-gray-400 font-bold">Cargando asignaciones...</p>
+                                        </div>
+                                    ) : sociosAsignados.length === 0 ? (
+                                        <div className="text-center py-20 bg-gray-50 rounded-[32px] border-2 border-dashed border-gray-200">
+                                            <Ticket className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                                            <p className="text-gray-400 font-bold">Sin asignaciones registradas</p>
+                                        </div>
+                                    ) : (
+                                        <table className="w-full">
+                                            <thead>
+                                                <tr className="text-left">
+                                                    <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Socio</th>
+                                                    <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-center">Décimos</th>
+                                                    <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Pagado</th>
+                                                    <th className="pb-4 text-[10px] font-black text-gray-400 uppercase tracking-widest text-right">Pendiente</th>
                                                 </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                )}
+                                            </thead>
+                                            <tbody className="divide-y divide-gray-50">
+                                                {sociosAsignados.map((s) => (
+                                                    <tr key={s.id} className="group hover:bg-gray-50/20 transition-colors">
+                                                        <td className="py-4 pl-4 font-bold text-fila-dark truncate max-w-[200px]">
+                                                            {s.nombre}
+                                                        </td>
+                                                        <td className="py-4 text-center">
+                                                            <span className="px-2 py-1 bg-gray-100 rounded-lg text-[10px] font-black text-gray-500">
+                                                                {s.cantidad}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-4 text-right text-sm font-black text-green-600">
+                                                            {s.pagado > 0 ? `${s.pagado.toFixed(2)}€` : '-'}
+                                                        </td>
+                                                        <td className="py-4 pr-4 text-right text-sm font-black text-orange-600">
+                                                            {s.pendiente > 0 ? `${s.pendiente.toFixed(2)}€` : 'Liquidado'}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    )}
+                                </div>
                             </div>
                         </div>
-                    </div>
-                )}
-            </div>
-        </main>
+                    )
+                }
+            </div >
+        </main >
     );
 }

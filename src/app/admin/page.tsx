@@ -30,6 +30,8 @@ interface Quota {
     id: string;
     nombre: string;
     monto: number;
+    epigrafe_id?: string;
+    subepigrafe_id?: string;
 }
 
 interface Sorteo {
@@ -43,6 +45,19 @@ interface Profile {
     socio_id: string | null;
 }
 
+interface Epigrafe {
+    id: string;
+    nombre: string;
+    tipo: 'ingreso' | 'pago' | 'ambos';
+    is_system: boolean;
+}
+
+interface Subepigrafe {
+    id: string;
+    epigrafe_id: string;
+    nombre: string;
+}
+
 interface Transaction {
     id: string;
     socio_id: string;
@@ -51,11 +66,20 @@ interface Transaction {
     concepto: string;
     categoria: string;
     subcategoria?: string;
+    epigrafe_id?: string;
+    subepigrafe_id?: string;
     fecha: string;
     estado: 'pendiente' | 'completado' | 'cancelado';
     socios: {
         nombre: string;
         primer_apellido: string;
+    };
+    epigrafes?: {
+        nombre: string;
+        tipo: string;
+    };
+    subepigrafes?: {
+        nombre: string;
     };
 }
 
@@ -103,20 +127,23 @@ function AdminDashboardContent() {
         monto: '',
         concepto: '',
         categoria: 'Local Social',
-        subcategoria: ''
+        subcategoria: '',
+        epigrafe_id: '',
+        subepigrafe_id: ''
     });
 
-    const subcategoriasMap: Record<string, string[]> = {
-        'Local Social': ['Mantenimiento', 'Luz', 'Agua', 'Limpieza', 'Alquiler', 'Seguros', 'Otros'],
-        'Celebraciones': ['Música (Actos)', 'Flores', 'Pólvora', 'Carpas/Infraestructura', 'Imprenta/Libro', 'Otros'],
-        'Bandas Música': ['Honorarios', 'Comida', 'Transporte', 'Alojamiento', 'Otros'],
-        'Gastos Corrientes': ['Material Oficina', 'Correos', 'Gestoría', 'Seguros', 'Comisiones Bancarias', 'Otros'],
-        'Comida Fiestas': ['Catering', 'Compras Supermercado', 'Bebidas', 'Camareros/Personal', 'Otros'],
-        'Bebida Fiestas': ['Compra Bebidas', 'Servicio Barra', 'Otros'],
-        'Aniversario': ['Actos Especiales', 'Publicaciones', 'Recuerdos/Detalles', 'Otros'],
-        'Marketing': ['Merchandising', 'Redes Sociales', 'Publicidad', 'Web/Hosting', 'Otros'],
-        'Gasto': ['Otros Gastos']
-    };
+    const [configEpigrafes, setConfigEpigrafes] = useState<Epigrafe[]>([]);
+    const [configSubepigrafes, setConfigSubepigrafes] = useState<Subepigrafe[]>([]);
+
+    useEffect(() => {
+        const fetchConfig = async () => {
+            const { data: epi } = await supabase.from('config_epigrafes').select('*').order('nombre');
+            const { data: sub } = await supabase.from('config_subepigrafes').select('*').order('nombre');
+            if (epi) setConfigEpigrafes(epi);
+            if (sub) setConfigSubepigrafes(sub);
+        };
+        fetchConfig();
+    }, []);
 
     const [isEventModalOpen, setIsEventModalOpen] = useState(false);
     const [selectedEvento, setSelectedEvento] = useState<any>(null);
@@ -145,6 +172,9 @@ function AdminDashboardContent() {
         desgloseGastos: {} as Record<string, Record<string, number>>,
         desgloseIngresos: {} as Record<string, Record<string, number>>
     });
+
+    const [showIncomeSubs, setShowIncomeSubs] = useState(true);
+    const [showExpenseSubs, setShowExpenseSubs] = useState(true);
 
     const [createForm, setCreateForm] = useState({
         nombre: '',
@@ -225,7 +255,12 @@ function AdminDashboardContent() {
     const fetchRecentTransactions = async () => {
         const { data } = await supabase
             .from('pagos_cobros')
-            .select('*, socios(nombre, primer_apellido)')
+            .select(`
+                *, 
+                socios(nombre, primer_apellido),
+                epigrafes:epigrafe_id(nombre, tipo),
+                subepigrafes:subepigrafe_id(nombre)
+            `)
             .order('fecha', { ascending: false })
             .limit(15);
         if (data) setRecentTransactions(data as any);
@@ -241,7 +276,9 @@ function AdminDashboardContent() {
                     loterias_asignadas(
                         sorteos(precio, recargo)
                     )
-                )
+                ),
+                epigrafes:epigrafe_id(nombre, tipo),
+                subepigrafes:subepigrafe_id(nombre)
             `)
             .eq('estado', 'completado');
 
@@ -251,73 +288,58 @@ function AdminDashboardContent() {
         }
 
         if (data) {
-            const totals = data.reduce((acc, t) => {
+            const totals = (data as any[]).reduce((acc, t) => {
                 const monto = Number(t.monto);
+
+                // Determine Epigrafe and Subepigrafe
+                const epName = t.epigrafes?.nombre || t.categoria || 'Otros';
+                const subName = t.subepigrafes?.nombre || t.subcategoria || 'Varios';
+                const epTipo = t.epigrafes?.tipo || (t.tipo === 'pago' ? 'ingreso' : 'pago');
+
                 if (t.tipo === 'pago') {
                     // INGRESOS (En la tabla pagos_cobros, tipo 'pago' para el socio es un ingreso para la Filà)
-                    if (t.categoria === 'Cuota') acc.ingresosCuotas += monto;
-                    else if (t.categoria === 'Lotería') {
-                        // Calcular solo el beneficio (el recargo)
-                        let profitAmount = monto;
-                        const sorteoInfo = t.loterias_asignadas?.[0]?.sorteos || (t as any).parent?.loterias_asignadas?.[0]?.sorteos;
 
+                    // Specific Logic for Summary Cards
+                    if (epName === 'Cuota') acc.ingresosCuotas += monto;
+                    else if (epName === 'Lotería') {
+                        let profitAmount = monto;
+                        const sorteoInfo = t.loterias_asignadas?.[0]?.sorteos || t.parent?.loterias_asignadas?.[0]?.sorteos;
                         if (sorteoInfo) {
                             const precio = Number(sorteoInfo.precio);
                             const recargo = Number(sorteoInfo.recargo);
                             const totalTicket = precio + recargo;
-                            if (totalTicket > 0) {
-                                profitAmount = monto * (recargo / totalTicket);
-                            }
+                            if (totalTicket > 0) profitAmount = monto * (recargo / totalTicket);
+                        } else if (t.concepto?.toLowerCase().includes('mensual')) {
+                            profitAmount = monto * (1 / 7);
                         } else {
-                            // Fallback: Si no hay link, asumimos que es lotería mensual estándar (7€ total, 1€ recargo)
-                            // o intentamos buscar el texto en el concepto
-                            if (t.concepto?.toLowerCase().includes('mensual')) {
-                                profitAmount = monto * (1 / 7);
-                            } else {
-                                // Si no podemos determinarlo, dejamos el monto entero o aplicamos un % estimado?
-                                // El usuario dice "solo beneficio", así que si no sabemos, mejor ser conservadores.
-                                // Podríamos usar un 15% como media, pero mejor dejarlo documentado.
-                                profitAmount = monto * 0.15; // Estimación general 15% si no hay datos
-                            }
+                            profitAmount = monto * 0.15;
                         }
                         acc.ingresosLoteria += profitAmount;
-                    } else if (t.categoria === 'Evento' || t.categoria === 'Festejos/Actos') acc.ingresosEventos += monto;
-                    else if (t.categoria === 'Marketing/Material' || t.categoria === 'Marketing/Ventas') acc.ingresosMarketing += monto;
-                    else if (t.categoria === 'Local Social') acc.gastosLocal += monto;
-                    else if (t.categoria === 'Celebraciones') acc.gastosCelebraciones += monto;
-                    else if (t.categoria === 'Bandas Música') acc.gastosBandas += monto;
-                    else if (t.categoria === 'Gastos Corrientes') acc.gastosCorrientes += monto;
-                    else if (t.categoria === 'Comida Fiestas') acc.gastosComida += monto;
-                    else if (t.categoria === 'Bebida Fiestas') acc.gastosBebida += monto;
-                    else if (t.categoria === 'Aniversario') acc.gastosAniversario += monto;
-                    else if (t.categoria === 'Marketing' && t.tipo === 'pago' && !t.socio_id) acc.gastosMarketing += monto;
-                    else if (t.categoria === 'Gasto' || t.categoria === 'Otros Gastos') acc.gastosOtros += monto;
+                    }
+                    else if (epName === 'Evento' || epName === 'Festejos/Actos') acc.ingresosEventos += monto;
+                    else if (epName === 'Marketing' || epName.includes('Marketing')) acc.ingresosMarketing += monto;
+                    // For expenses incorrectly categorized as 'pago' (legacy)
+                    else if (epTipo === 'pago') {
+                        if (epName === 'Local Social') acc.gastosLocal += monto;
+                        else if (epName === 'Celebraciones') acc.gastosCelebraciones += monto;
+                        else if (epName === 'Bandas Música') acc.gastosBandas += monto;
+                        else if (epName === 'Gastos Corrientes') acc.gastosCorrientes += monto;
+                        else if (epName === 'Comida Fiestas') acc.gastosComida += monto;
+                        else if (epName === 'Bebida Fiestas') acc.gastosBebida += monto;
+                        else if (epName === 'Aniversario') acc.gastosAniversario += monto;
+                        else if (epName === 'Gasto') acc.gastosOtros += monto;
+                        else acc.gastosOtros += monto;
+                    }
                     else acc.ingresosOtros += monto;
 
-                    // Desglose por subcategoría de GASTOS (Filà)
-                    if (!t.socio_id || (t.categoria !== 'Cuota' && t.categoria !== 'Lotería' && t.categoria !== 'Evento' && t.categoria !== 'Festejos/Actos')) {
-                        const cat = t.categoria || 'Sin Categoría';
-                        const sub = t.subcategoria || 'Otros';
-                        if (!acc.desgloseGastos[cat]) acc.desgloseGastos[cat] = {};
-                        acc.desgloseGastos[cat][sub] = (acc.desgloseGastos[cat][sub] || 0) + monto;
-                    }
-
-                    // Desglose de INGRESOS (Socios)
-                    if (t.socio_id) {
-                        let cat = t.categoria || 'Otros';
-                        if (cat === 'Festejos/Actos') cat = 'Evento';
-                        if (cat === 'Marketing/Material' || cat === 'Marketing/Ventas') cat = 'Marketing';
-
-                        let sub = 'Otros';
+                    // Breakdown for Income Table
+                    if (epTipo === 'ingreso' || epTipo === 'ambos') {
                         let val = monto;
+                        let sName = subName;
 
-                        if (cat === 'Cuota') {
-                            const parts = t.concepto?.split(':');
-                            sub = parts && parts.length > 1 ? parts[1].trim() : (t.concepto || 'Cuota General');
-                        } else if (cat === 'Lotería') {
-                            // ... existing lottery logic ...
+                        if (epName === 'Lotería') {
                             let localProfit = monto;
-                            const sorteoInfo = t.loterias_asignadas?.[0]?.sorteos || (t as any).parent?.loterias_asignadas?.[0]?.sorteos;
+                            const sorteoInfo = t.loterias_asignadas?.[0]?.sorteos || t.parent?.loterias_asignadas?.[0]?.sorteos;
                             if (sorteoInfo) {
                                 const precio = Number(sorteoInfo.precio);
                                 const recargo = Number(sorteoInfo.recargo);
@@ -329,28 +351,39 @@ function AdminDashboardContent() {
                                 localProfit = monto * 0.15;
                             }
                             val = localProfit;
-                            sub = t.concepto?.split(':').pop()?.split('(')[0]?.trim() || 'Sorteos';
-                        } else if (cat === 'Evento') {
+                            if (sName === 'Varios') sName = t.concepto?.split(':').pop()?.split('(')[0]?.trim() || 'Sorteos';
+                        } else if (epName === 'Cuota' && sName === 'Varios') {
                             const parts = t.concepto?.split(':');
-                            sub = parts && parts.length > 1 ? parts[1].trim().split('(')[0].trim() : (t.concepto || 'Varios');
-                        } else {
-                            sub = t.subcategoria || 'Varios';
+                            sName = parts && parts.length > 1 ? parts[1].trim() : (t.concepto || 'Cuota General');
+                        } else if (epName === 'Evento' && sName === 'Varios') {
+                            const parts = t.concepto?.split(':');
+                            sName = parts && parts.length > 1 ? parts[1].trim().split('(')[0].trim() : (t.concepto || 'Varios');
                         }
 
-                        if (!acc.desgloseIngresos[cat]) acc.desgloseIngresos[cat] = {};
-                        acc.desgloseIngresos[cat][sub] = (acc.desgloseIngresos[cat][sub] || 0) + val;
+                        if (!acc.desgloseIngresos[epName]) acc.desgloseIngresos[epName] = {};
+                        acc.desgloseIngresos[epName][sName] = (acc.desgloseIngresos[epName][sName] || 0) + val;
+                    }
+
+                    // Breakdown for Expense Table (if categorized as 'pago')
+                    if (epTipo === 'pago') {
+                        if (!acc.desgloseGastos[epName]) acc.desgloseGastos[epName] = {};
+                        acc.desgloseGastos[epName][subName] = (acc.desgloseGastos[epName][subName] || 0) + monto;
                     }
                 } else if (t.tipo === 'cobro') {
-                    // Si registramos un cobro que sea devolución o pago de la filà
-                    if (t.categoria === 'Local Social') acc.gastosLocal += monto;
-                    else if (t.categoria === 'Celebraciones') acc.gastosCelebraciones += monto;
-                    else if (t.categoria === 'Bandas Música') acc.gastosBandas += monto;
-                    else if (t.categoria === 'Gastos Corrientes') acc.gastosCorrientes += monto;
-                    else if (t.categoria === 'Comida Fiestas') acc.gastosComida += monto;
-                    else if (t.categoria === 'Bebida Fiestas') acc.gastosBebida += monto;
-                    else if (t.categoria === 'Aniversario') acc.gastosAniversario += monto;
-                    else if (t.categoria === 'Marketing') acc.gastosMarketing += monto;
-                    else if (t.categoria === 'Gasto') acc.gastosOtros += monto;
+                    // Logic for expenses/outgoings
+                    if (epName === 'Local Social') acc.gastosLocal += monto;
+                    else if (epName === 'Celebraciones') acc.gastosCelebraciones += monto;
+                    else if (epName === 'Bandas Música') acc.gastosBandas += monto;
+                    else if (epName === 'Gastos Corrientes') acc.gastosCorrientes += monto;
+                    else if (epName === 'Comida Fiestas') acc.gastosComida += monto;
+                    else if (epName === 'Bebida Fiestas') acc.gastosBebida += monto;
+                    else if (epName === 'Aniversario') acc.gastosAniversario += monto;
+                    else if (epName === 'Marketing' || epName === 'Marketing Material') acc.gastosMarketing += monto;
+                    else if (epName === 'Gasto') acc.gastosOtros += monto;
+                    else acc.gastosOtros += monto;
+
+                    if (!acc.desgloseGastos[epName]) acc.desgloseGastos[epName] = {};
+                    acc.desgloseGastos[epName][subName] = (acc.desgloseGastos[epName][subName] || 0) + monto;
                 }
                 return acc;
             }, {
@@ -385,36 +418,63 @@ function AdminDashboardContent() {
     };
 
     const exportToCSV = (data: Transaction[]) => {
-        const headers = ['Socio / Entidad', 'Concepto', 'Categoría', 'Tipo', 'Monto', 'Fecha', 'Estado'];
         let csvRows = [];
 
         if (activeTab === 'balance') {
             csvRows.push(['RESUMEN DE TESORERIA']);
-            csvRows.push(['Total Ingresos', balanceData.totalIngresos.toFixed(2) + '€']);
-            csvRows.push(['Total Gastos', balanceData.totalGastos.toFixed(2) + '€']);
-            csvRows.push(['BALANCE NETO', balanceData.balance.toFixed(2) + '€']);
+            csvRows.push(['Total Ingresos', `"${balanceData.totalIngresos.toFixed(2)}€"`]);
+            csvRows.push(['Total Gastos', `"${balanceData.totalGastos.toFixed(2)}€"`]);
+            csvRows.push(['BALANCE NETO', `"${balanceData.balance.toFixed(2)}€"`]);
             csvRows.push([]); // Spacer
+
+            csvRows.push(['DESGLOSE DE INGRESOS']);
+            csvRows.push(['Categoria/Subcategoria', 'Monto']);
+            Object.entries(balanceData.desgloseIngresos).forEach(([cat, subs]) => {
+                const catTotal = Object.values(subs).reduce((a, b) => a + b, 0);
+                csvRows.push([`"${cat}"`, `"${catTotal.toFixed(2)}€"`]);
+
+                if (showIncomeSubs) {
+                    Object.entries(subs).sort((a, b) => b[1] - a[1]).forEach(([sub, val]) => {
+                        csvRows.push([`"  ${sub}"`, `"${val.toFixed(2)}€"`]);
+                    });
+                }
+            });
+            csvRows.push([]); // Spacer
+
+            csvRows.push(['DESGLOSE DE GASTOS']);
+            csvRows.push(['Categoria/Subcategoria', 'Monto']);
+            Object.entries(balanceData.desgloseGastos).forEach(([cat, subs]) => {
+                const catTotal = Object.values(subs).reduce((a, b) => a + b, 0);
+                csvRows.push([`"${cat}"`, `"${catTotal.toFixed(2)}€"`]);
+
+                if (showExpenseSubs) {
+                    Object.entries(subs).sort((a, b) => b[1] - a[1]).forEach(([sub, val]) => {
+                        csvRows.push([`"  ${sub}"`, `"${val.toFixed(2)}€"`]);
+                    });
+                }
+            });
+        } else {
+            const headers = ['Socio / Entidad', 'Concepto', 'Categoría', 'Monto', 'Fecha', 'Estado'];
+            csvRows.push(headers.join(','));
+            data.forEach(t => {
+                csvRows.push([
+                    `"${t.socios ? t.socios.nombre + ' ' + t.socios.primer_apellido : '---'}"`,
+                    `"${t.concepto}"`,
+                    `"${t.categoria}"`,
+                    t.tipo === 'pago' ? `"+${t.monto}€"` : `"-${t.monto}€"`,
+                    `"${new Date(t.fecha).toLocaleDateString()}"`,
+                    `"${t.estado}"`
+                ].join(','));
+            });
         }
 
-        csvRows.push(headers.join(','));
-        data.forEach(t => {
-            csvRows.push([
-                `"${t.socios ? t.socios.nombre + ' ' + t.socios.primer_apellido : 'Administración'}"`,
-                `"${t.concepto}"`,
-                `"${t.categoria}"`,
-                `"${t.tipo}"`,
-                t.monto,
-                `"${new Date(t.fecha).toLocaleString()}"`,
-                `"${t.estado}"`
-            ].join(','));
-        });
-
-        const csvContent = csvRows.join('\n');
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const csvContent = csvRows.map(row => Array.isArray(row) ? row.join(',') : row).join('\n');
+        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.setAttribute('href', url);
-        link.setAttribute('download', `informe_financiero_${new Date().toISOString().split('T')[0]}.csv`);
+        const fileName = activeTab === 'balance' ? 'balance_anual' : `movimientos_${activeTab}`;
+        link.setAttribute('download', `${fileName}_${new Date().toISOString().split('T')[0]}.csv`);
         link.style.visibility = 'hidden';
         document.body.appendChild(link);
         link.click();
@@ -424,57 +484,118 @@ function AdminDashboardContent() {
     const exportToPDF = (data: Transaction[]) => {
         const doc = new jsPDF();
 
+        // Estilos base
+        const filaGold: [number, number, number] = [184, 134, 11];
+        const filaDark: [number, number, number] = [31, 31, 31];
+        const redGasto: [number, number, number] = [220, 38, 38];
+        const greenIngreso: [number, number, number] = [5, 150, 105];
+
+        // Encabezado
         doc.setFontSize(22);
+        doc.setTextColor(filaDark[0], filaDark[1], filaDark[2]);
         doc.text('Filà Moros del Castell', 14, 22);
+
         doc.setFontSize(14);
         doc.setTextColor(100);
-        doc.text(activeTab === 'balance' ? 'Informe de Balance de Tesorería' : 'Informe Detallado de Movimientos', 14, 30);
+        doc.text(activeTab === 'balance' ? 'Informe de Balance Anual' : 'Informe Detallado de Movimientos', 14, 30);
+
         doc.setFontSize(10);
         doc.text(`Generado el: ${new Date().toLocaleString()}`, 14, 38);
 
         let startY = 45;
 
         if (activeTab === 'balance') {
-            // Summary for Balance
+            // Cuadro de Resumen Principal
             doc.setFillColor(248, 249, 250);
-            doc.rect(14, 45, 182, 35, 'F');
+            doc.roundedRect(14, 45, 182, 35, 3, 3, 'F');
 
             doc.setFontSize(12);
-            doc.setTextColor(40);
+            doc.setTextColor(filaDark[0], filaDark[1], filaDark[2]);
             doc.setFont('helvetica', 'bold');
-            doc.text('Resumen de Arcas:', 20, 55);
+            doc.text('RESUMEN GENERAL:', 20, 55);
 
             doc.setFontSize(10);
             doc.setFont('helvetica', 'normal');
             doc.text(`Total Ingresos: +${balanceData.totalIngresos.toFixed(2)}€`, 20, 65);
             doc.text(`Total Gastos: -${balanceData.totalGastos.toFixed(2)}€`, 20, 72);
 
-            doc.setFontSize(12);
+            doc.setFontSize(14);
             doc.setFont('helvetica', 'bold');
-            doc.setTextColor(balanceData.balance >= 0 ? 0 : 200, balanceData.balance >= 0 ? 100 : 0, 0);
+            if (balanceData.balance >= 0) {
+                doc.setTextColor(greenIngreso[0], greenIngreso[1], greenIngreso[2]);
+            } else {
+                doc.setTextColor(redGasto[0], redGasto[1], redGasto[2]);
+            }
             doc.text(`BALANCE NETO: ${balanceData.balance.toFixed(2)}€`, 120, 65);
 
-            startY = 90;
+            // Preparar Tablas de Desglose
+            const incomeRows: any[] = [];
+            Object.entries(balanceData.desgloseIngresos).forEach(([cat, subs]) => {
+                const catTotal = Object.values(subs).reduce((a, b) => a + b, 0);
+                incomeRows.push([{ content: cat, styles: { fontStyle: 'bold', fillColor: [240, 253, 244] } }, { content: `${catTotal.toFixed(2)}€`, styles: { fontStyle: 'bold', fillColor: [240, 253, 244] } }]);
+
+                if (showIncomeSubs) {
+                    Object.entries(subs).sort((a, b) => b[1] - a[1]).forEach(([sub, val]) => {
+                        incomeRows.push([`  ${sub}`, `${val.toFixed(2)}€`]);
+                    });
+                }
+            });
+
+            const expenseRows: any[] = [];
+            Object.entries(balanceData.desgloseGastos).forEach(([cat, subs]) => {
+                const catTotal = Object.values(subs).reduce((a, b) => a + b, 0);
+                expenseRows.push([{ content: cat, styles: { fontStyle: 'bold', fillColor: [254, 242, 242] } }, { content: `${catTotal.toFixed(2)}€`, styles: { fontStyle: 'bold', fillColor: [254, 242, 242] } }]);
+
+                if (showExpenseSubs) {
+                    Object.entries(subs).sort((a, b) => b[1] - a[1]).forEach(([sub, val]) => {
+                        expenseRows.push([`  ${sub}`, `${val.toFixed(2)}€`]);
+                    });
+                }
+            });
+
+            // Tabla de Ingresos (Columna Izquierda)
+            autoTable(doc, {
+                head: [[{ content: 'INGRESOS', colSpan: 2, styles: { halign: 'center', fillColor: greenIngreso } }]],
+                body: incomeRows,
+                startY: 90,
+                margin: { right: 107 }, // Deja espacio para la columna derecha
+                styles: { fontSize: 8 },
+                theme: 'striped'
+            });
+
+            // Tabla de Gastos (Columna Derecha)
+            // Usamos el mismo startY que la de ingresos
+            autoTable(doc, {
+                head: [[{ content: 'GASTOS', colSpan: 2, styles: { halign: 'center', fillColor: redGasto } }]],
+                body: expenseRows,
+                startY: 90,
+                margin: { left: 107 }, // Empieza después de la columna izquierda
+                styles: { fontSize: 8 },
+                theme: 'striped'
+            });
+
+        } else {
+            // Informe detallado de movimientos (para la pestaña de movimientos)
+            const tableData = data.map(t => [
+                t.socios ? `${t.socios?.nombre} ${t.socios?.primer_apellido}` : '---',
+                t.concepto,
+                t.categoria,
+                t.tipo === 'pago' ? '+' + t.monto + '€' : '-' + t.monto + '€',
+                new Date(t.fecha).toLocaleDateString(),
+                t.estado
+            ]);
+
+            autoTable(doc, {
+                head: [['Socio / Entidad', 'Concepto', 'Categoría', 'Monto', 'Fecha', 'Estado']],
+                body: tableData,
+                startY: startY,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: filaGold }
+            });
         }
 
-        const tableData = data.map(t => [
-            t.socios ? `${t.socios?.nombre} ${t.socios?.primer_apellido}` : '---',
-            t.concepto,
-            t.categoria,
-            t.tipo === 'pago' ? '+' + t.monto + '€' : '-' + t.monto + '€',
-            new Date(t.fecha).toLocaleDateString(),
-            t.estado
-        ]);
-
-        autoTable(doc, {
-            head: [['Socio / Entidad', 'Concepto', 'Categoría', 'Monto', 'Fecha', 'Estado']],
-            body: tableData,
-            startY: startY,
-            styles: { fontSize: 8 },
-            headStyles: { fillColor: [184, 134, 11] }
-        });
-
-        doc.save(`informe_${activeTab}_${new Date().toISOString().split('T')[0]}.pdf`);
+        const fileName = activeTab === 'balance' ? 'balance_anual' : `informe_${activeTab}`;
+        doc.save(`${fileName}_${new Date().toISOString().split('T')[0]}.pdf`);
     };
 
     const handleExport = async (type: 'csv' | 'pdf') => {
@@ -696,18 +817,23 @@ function AdminDashboardContent() {
         const { error } = await supabase
             .from('pagos_cobros')
             .insert([{
-                socio_id: null, // Asumimos que el balance general no requiere socio_id o permite null
-                tipo: 'pago',
+                socio_id: null,
+                tipo: 'cobro', // Para la Filà, un gasto es un tipo cobro (salida) o pago (entrada)? 
+                // Wait, in previous code:
+                // acc.gastosLocal += monto if t.tipo === 'cobro'
+                // so gasto should be 'cobro'
                 monto: montoNum,
                 concepto: gastoForm.concepto,
                 categoria: gastoForm.categoria,
                 subcategoria: gastoForm.subcategoria,
+                epigrafe_id: gastoForm.epigrafe_id || null,
+                subepigrafe_id: gastoForm.subepigrafe_id || null,
                 estado: 'completado'
             }]);
 
         if (!error) {
             setIsGastoModalOpen(false);
-            setGastoForm({ monto: '', concepto: '', categoria: 'Local Social', subcategoria: '' });
+            setGastoForm({ monto: '', concepto: '', categoria: 'Local Social', subcategoria: '', epigrafe_id: '', subepigrafe_id: '' });
             fetchBalanceData();
             fetchRecentTransactions();
         } else {
@@ -784,7 +910,9 @@ function AdminDashboardContent() {
                 monto: quota?.monto || 0,
                 concepto: `Cuota Anual ${year}: ${quota?.nombre || 'General'}`,
                 categoria: 'Cuota',
-                estado: 'pendiente'
+                estado: 'pendiente',
+                epigrafe_id: (quota as any)?.epigrafe_id || null,
+                subepigrafe_id: (quota as any)?.subepigrafe_id || null
             };
         });
 
@@ -920,7 +1048,7 @@ function AdminDashboardContent() {
                                 }`}
                         >
                             <LayoutDashboard size={16} />
-                            <span>Balance Financiero</span>
+                            <span>Balance Anual</span>
                         </button>
                     </div>
 
@@ -1203,8 +1331,15 @@ function AdminDashboardContent() {
                     {activeTab === 'balance' && (
                         <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8">
                             <div className="flex justify-between items-center mb-6">
-                                <h3 className="text-2xl font-black text-fila-dark uppercase tracking-tight">Resumen de Tesorería</h3>
+                                <h3 className="text-2xl font-black text-fila-dark uppercase tracking-tight">Balance Anual</h3>
                                 <div className="flex items-center gap-3">
+                                    <Link
+                                        href="/admin/configuracion"
+                                        className="p-2.5 bg-gray-100 text-gray-400 rounded-xl hover:bg-fila-gold hover:text-white transition-all shadow-sm"
+                                        title="Configurar Categorías"
+                                    >
+                                        <Settings size={20} />
+                                    </Link>
                                     <button
                                         onClick={() => handleExport('csv')}
                                         disabled={isExporting}
@@ -1259,94 +1394,130 @@ function AdminDashboardContent() {
                             {/* Breakdown Grid */}
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                                 <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm">
-                                    <h4 className="text-lg font-black text-fila-dark uppercase tracking-tight mb-6 flex items-center gap-2">
-                                        <div className="w-2 h-8 bg-fila-gold rounded-full" />
-                                        Desglose de Ingresos
+                                    <h4 className="text-lg font-black text-fila-dark uppercase tracking-tight mb-6 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-2 h-8 bg-fila-gold rounded-full" />
+                                            Desglose de Ingresos
+                                        </div>
+                                        <label className="flex items-center gap-2 cursor-pointer group">
+                                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest group-hover:text-fila-gold transition-colors">Ver Detalles</span>
+                                            <input
+                                                type="checkbox"
+                                                checked={showIncomeSubs}
+                                                onChange={e => setShowIncomeSubs(e.target.checked)}
+                                                className="w-4 h-4 accent-fila-gold cursor-pointer"
+                                            />
+                                        </label>
                                     </h4>
                                     <div className="space-y-6">
-                                        {[
-                                            { id: 'Cuota', label: 'Cuotas de Socios', color: 'bg-emerald-500', icon: UserCheck },
-                                            { id: 'Lotería', label: 'Loterías (Donativo)', color: 'bg-amber-500', icon: Ticket },
-                                            { id: 'Evento', label: 'Festejos / Actos', color: 'bg-indigo-500', icon: Star },
-                                            { id: 'Marketing', label: 'Marketing / Merch', color: 'bg-blue-500', icon: Info },
-                                            { id: 'Otros', label: 'Otros Conceptos', color: 'bg-gray-400', icon: Euro },
-                                        ].map((category, i) => {
-                                            const subs = balanceData.desgloseIngresos[category.id] || {};
-                                            const total = Object.values(subs).reduce((a, b) => a + b, 0);
+                                        {configEpigrafes
+                                            .filter(ep => ep.tipo === 'ingreso' || ep.tipo === 'ambos')
+                                            .map((category, i) => {
+                                                const configMap: Record<string, { label: string, color: string, icon: any }> = {
+                                                    'Cuota': { label: 'Cuotas de Socios', color: 'bg-emerald-500', icon: UserCheck },
+                                                    'Lotería': { label: 'Loterías (Donativo)', color: 'bg-amber-500', icon: Ticket },
+                                                    'Evento': { label: 'Festejos / Actos', color: 'bg-indigo-500', icon: Star },
+                                                    'Marketing': { label: 'Marketing / Merch', color: 'bg-blue-500', icon: Info },
+                                                    'Otros': { label: 'Otros Conceptos', color: 'bg-gray-400', icon: Euro }
+                                                };
+                                                const catConfig = configMap[category.nombre] || { label: category.nombre, color: 'bg-gray-400', icon: Info };
+                                                const Icon = catConfig.icon;
 
-                                            if (total === 0) return null;
+                                                const subs = balanceData.desgloseIngresos[category.nombre] || {};
+                                                const total = Object.values(subs).reduce((a, b) => a + b, 0);
 
-                                            return (
-                                                <div key={i} className="bg-gray-50/20 rounded-[32px] border border-gray-100/50 overflow-hidden">
-                                                    <div className="flex items-center justify-between p-4 bg-gray-50/40">
-                                                        <div className="flex items-center gap-4">
-                                                            <div className={`w-10 h-10 rounded-2xl ${category.color} text-white flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform`}>
-                                                                <category.icon size={18} />
+                                                if (total === 0) return null;
+
+                                                return (
+                                                    <div key={i} className="bg-gray-50/20 rounded-[32px] border border-gray-100/50 overflow-hidden">
+                                                        <div className="flex items-center justify-between p-4 bg-gray-50/40">
+                                                            <div className="flex items-center gap-4">
+                                                                <div className={`w-10 h-10 rounded-2xl ${catConfig.color} text-white flex items-center justify-center shadow-lg group-hover:scale-105 transition-transform`}>
+                                                                    <Icon size={18} />
+                                                                </div>
+                                                                <div>
+                                                                    <p className="text-sm font-black text-fila-dark uppercase tracking-tight">{catConfig.label}</p>
+                                                                </div>
                                                             </div>
-                                                            <div>
-                                                                <p className="text-sm font-black text-fila-dark uppercase tracking-tight">{category.label}</p>
-                                                            </div>
+                                                            <p className="text-lg font-black text-fila-dark">{total.toFixed(2)}€</p>
                                                         </div>
-                                                        <p className="text-lg font-black text-fila-dark">{total.toFixed(2)}€</p>
-                                                    </div>
-                                                    <div className="px-5 pb-4 pt-2 space-y-2">
-                                                        {Object.entries(subs).sort((a, b) => b[1] - a[1]).map(([subName, subAmount], j) => (
-                                                            <div key={j} className="flex justify-between items-center pl-14 pr-2">
-                                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{subName}</p>
-                                                                <p className="text-[10px] font-black text-fila-dark">{subAmount.toFixed(2)}€</p>
+                                                        {showIncomeSubs && (
+                                                            <div className="px-5 pb-4 pt-2 space-y-2">
+                                                                {Object.entries(subs).sort((a, b) => b[1] - a[1]).map(([subName, subAmount], j) => (
+                                                                    <div key={j} className="flex justify-between items-center pl-14 pr-2">
+                                                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{subName}</p>
+                                                                        <p className="text-[10px] font-black text-fila-dark">{subAmount.toFixed(2)}€</p>
+                                                                    </div>
+                                                                ))}
                                                             </div>
-                                                        ))}
+                                                        )}
                                                     </div>
-                                                </div>
-                                            );
-                                        })}
+                                                );
+                                            })}
                                     </div>
                                 </div>
 
                                 <div className="bg-white p-8 rounded-[40px] border border-gray-100 shadow-sm">
-                                    <h4 className="text-lg font-black text-fila-dark uppercase tracking-tight mb-6 flex items-center gap-2">
-                                        <div className="w-2 h-8 bg-red-500 rounded-full" />
-                                        Desglose de Gastos
+                                    <h4 className="text-lg font-black text-fila-dark uppercase tracking-tight mb-6 flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-2 h-8 bg-red-500 rounded-full" />
+                                            Desglose de Gastos
+                                        </div>
+                                        <label className="flex items-center gap-2 cursor-pointer group">
+                                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest group-hover:text-red-500 transition-colors">Ver Detalles</span>
+                                            <input
+                                                type="checkbox"
+                                                checked={showExpenseSubs}
+                                                onChange={e => setShowExpenseSubs(e.target.checked)}
+                                                className="w-4 h-4 accent-red-500 cursor-pointer"
+                                            />
+                                        </label>
                                     </h4>
                                     <div className="space-y-6">
-                                        {[
-                                            { id: 'Local Social', label: 'Local Social', icon: Shield },
-                                            { id: 'Celebraciones', label: 'Celebraciones', icon: Calendar },
-                                            { id: 'Bandas Música', label: 'Bandas Música', icon: Users },
-                                            { id: 'Gastos Corrientes', label: 'Gastos Corrientes', icon: Info },
-                                            { id: 'Comida Fiestas', label: 'Comida Fiestas', icon: Info },
-                                            { id: 'Bebida Fiestas', label: 'Bebida Fiestas', icon: Info },
-                                            { id: 'Aniversario', label: 'Aniversario', icon: Star },
-                                            { id: 'Marketing', label: 'Marketing', icon: Info },
-                                            { id: 'Gasto', label: 'Otros Gastos', icon: Trash2 },
-                                        ].map((category, i) => {
-                                            const subs = balanceData.desgloseGastos[category.id] || {};
-                                            const total = Object.values(subs).reduce((a, b) => a + b, 0);
+                                        {configEpigrafes
+                                            .filter(ep => ep.tipo === 'pago' || (ep.tipo === 'ambos' && !['Marketing', 'Otros'].includes(ep.nombre)))
+                                            .map((category, i) => {
+                                                const iconMap: Record<string, any> = {
+                                                    'Local Social': Shield,
+                                                    'Celebraciones': Calendar,
+                                                    'Bandas Música': Users,
+                                                    'Gastos Corrientes': Info,
+                                                    'Comida Fiestas': Info,
+                                                    'Bebida Fiestas': Info,
+                                                    'Aniversario': Star,
+                                                    'Marketing': Info,
+                                                    'Gasto': Trash2
+                                                };
+                                                const Icon = iconMap[category.nombre] || Info;
+                                                const subs = balanceData.desgloseGastos[category.nombre] || {};
+                                                const total = Object.values(subs).reduce((a, b) => a + b, 0);
 
-                                            if (total === 0) return null;
+                                                if (total === 0) return null;
 
-                                            return (
-                                                <div key={i} className="bg-red-50/20 rounded-[32px] border border-red-100/50 overflow-hidden">
-                                                    <div className="flex items-center justify-between p-4 bg-red-50/40">
-                                                        <div className="flex items-center gap-3">
-                                                            <div className="w-8 h-8 rounded-xl bg-red-100 text-red-600 flex items-center justify-center">
-                                                                <category.icon size={14} />
+                                                return (
+                                                    <div key={i} className="bg-red-50/20 rounded-[32px] border border-red-100/50 overflow-hidden">
+                                                        <div className="flex items-center justify-between p-4 bg-red-50/40">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className="w-8 h-8 rounded-xl bg-red-100 text-red-600 flex items-center justify-center">
+                                                                    <Icon size={14} />
+                                                                </div>
+                                                                <p className="text-xs font-black text-fila-dark uppercase tracking-tight">{category.nombre}</p>
                                                             </div>
-                                                            <p className="text-xs font-black text-fila-dark uppercase tracking-tight">{category.label}</p>
+                                                            <p className="text-sm font-black text-red-600">{total.toFixed(2)}€</p>
                                                         </div>
-                                                        <p className="text-sm font-black text-red-600">{total.toFixed(2)}€</p>
-                                                    </div>
-                                                    <div className="px-4 pb-4 pt-2 space-y-2">
-                                                        {Object.entries(subs).sort((a, b) => b[1] - a[1]).map(([subName, subAmount], j) => (
-                                                            <div key={j} className="flex justify-between items-center pl-11 pr-2">
-                                                                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{subName}</p>
-                                                                <p className="text-[10px] font-black text-gray-600">{subAmount.toFixed(2)}€</p>
+                                                        {showExpenseSubs && (
+                                                            <div className="px-4 pb-4 pt-2 space-y-2">
+                                                                {Object.entries(subs).sort((a, b) => b[1] - a[1]).map(([subName, subAmount], j) => (
+                                                                    <div key={j} className="flex justify-between items-center pl-11 pr-2">
+                                                                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{subName}</p>
+                                                                        <p className="text-[10px] font-black text-gray-600">{subAmount.toFixed(2)}€</p>
+                                                                    </div>
+                                                                ))}
                                                             </div>
-                                                        ))}
+                                                        )}
                                                     </div>
-                                                </div>
-                                            );
-                                        })}
+                                                );
+                                            })}
                                     </div>
                                 </div>
                             </div>
@@ -1528,11 +1699,23 @@ function AdminDashboardContent() {
                                         <select
                                             required
                                             value={gastoForm.categoria}
-                                            onChange={e => setGastoForm({ ...gastoForm, categoria: e.target.value, subcategoria: subcategoriasMap[e.target.value]?.[0] || '' })}
+                                            onChange={e => {
+                                                const epi = configEpigrafes.find(ep => ep.nombre === e.target.value);
+                                                const subs = configSubepigrafes.filter(s => s.epigrafe_id === epi?.id);
+                                                const firstSub = subs.length > 0 ? subs[0] : null;
+                                                setGastoForm({
+                                                    ...gastoForm,
+                                                    categoria: e.target.value,
+                                                    epigrafe_id: epi?.id || '',
+                                                    subcategoria: firstSub?.nombre || '',
+                                                    subepigrafe_id: firstSub?.id || ''
+                                                });
+                                            }}
                                             className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-red-500 outline-none font-bold bg-white"
                                         >
-                                            {Object.keys(subcategoriasMap).map(cat => (
-                                                <option key={cat} value={cat}>{cat}</option>
+                                            <option value="">Seleccionar...</option>
+                                            {configEpigrafes.filter(ep => ep.tipo === 'pago' || ep.tipo === 'ambos').map(cat => (
+                                                <option key={cat.id} value={cat.nombre}>{cat.nombre}</option>
                                             ))}
                                         </select>
                                     </div>
@@ -1542,13 +1725,22 @@ function AdminDashboardContent() {
                                         <select
                                             required
                                             value={gastoForm.subcategoria}
-                                            onChange={e => setGastoForm({ ...gastoForm, subcategoria: e.target.value })}
+                                            onChange={e => {
+                                                const sub = configSubepigrafes.find(s => s.nombre === e.target.value && s.epigrafe_id === gastoForm.epigrafe_id);
+                                                setGastoForm({
+                                                    ...gastoForm,
+                                                    subcategoria: e.target.value,
+                                                    subepigrafe_id: sub?.id || ''
+                                                });
+                                            }}
                                             className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-red-500 outline-none font-bold bg-white"
                                         >
-                                            <option value="" disabled>Seleccionar...</option>
-                                            {(subcategoriasMap[gastoForm.categoria] || []).map(sub => (
-                                                <option key={sub} value={sub}>{sub}</option>
-                                            ))}
+                                            <option value="">Ninguna / Varios</option>
+                                            {configSubepigrafes
+                                                .filter(s => s.epigrafe_id === gastoForm.epigrafe_id)
+                                                .map(sub => (
+                                                    <option key={sub.id} value={sub.nombre}>{sub.nombre}</option>
+                                                ))}
                                         </select>
                                     </div>
                                 </div>

@@ -24,9 +24,19 @@ interface Transaction {
     monto: number;
     concepto: string;
     categoria: string;
+    subcategoria?: string;
+    epigrafe_id?: string;
+    subepigrafe_id?: string;
     fecha: string;
     estado: 'pendiente' | 'completado' | 'cancelado';
     metodo_pago?: string;
+    epigrafes?: {
+        nombre: string;
+        tipo: string;
+    };
+    subepigrafes?: {
+        nombre: string;
+    };
 }
 
 export default function HistorialPage() {
@@ -54,14 +64,13 @@ export default function HistorialPage() {
             if (socioData) {
                 setSocio(socioData);
 
-                // Fetch Transactions
+                // Fetch Transactions with categorization
                 const { data: tData } = await supabase
                     .from('pagos_cobros')
-                    .select('*')
+                    .select('*, epigrafes:epigrafe_id(nombre, tipo), subepigrafes:subepigrafe_id(nombre)')
                     .eq('socio_id', socioData.id)
-                    .order('categoria', { ascending: true })
                     .order('fecha', { ascending: false });
-                if (tData) setTransactions(tData);
+                if (tData) setTransactions(tData as any);
             }
             setLoading(false);
         };
@@ -256,45 +265,38 @@ export default function HistorialPage() {
                 {/* Categories Sections */}
                 <div className="space-y-12">
                     {transactions.length > 0 ? (
-                        ['Cuota', 'Lotería', 'Evento', 'Varios'].map(catType => {
-                            const catTransactions = transactions.filter(t => (t.categoria || 'Varios') === catType);
+                        Array.from(new Set(transactions.map(t => t.epigrafes?.nombre || t.categoria || 'Varios'))).map(catName => {
+                            const catTransactions = transactions.filter(t => (t.epigrafes?.nombre || t.categoria || 'Varios') === catName);
                             if (catTransactions.length === 0) return null;
 
-                            const getSubGroupName = (concepto: string, categoria: string) => {
-                                let name = String(concepto || '');
-                                let previousName;
-                                do {
-                                    previousName = name;
-                                    name = name.replace(/^Abono parcial:\s*/i, '');
-                                    name = name.replace(/^Inscripción Evento:\s*/i, '');
-                                    name = name.replace(/^Lotería:\s*/i, '');
-                                } while (name !== previousName);
-
-                                if (categoria === 'Evento' || categoria === 'Lotería') {
-                                    return name.split('(')[0].trim() || (categoria === 'Evento' ? 'Otros Eventos' : 'Otros Sorteos');
-                                }
-                                return null;
+                            const style = {
+                                bg: 'bg-fila-gold/5',
+                                text: 'text-fila-gold',
+                                icon: <Euro size={20} />,
+                                label: catName,
+                                accent: 'bg-fila-gold'
                             };
 
-                            const subGroups = Array.from(new Set(catTransactions.map(t => getSubGroupName(t.concepto, t.categoria || 'Varios'))));
+                            // Specific branding for common categories if they match names
+                            if (catName === 'Cuota') {
+                                style.bg = 'bg-emerald-50'; style.text = 'text-emerald-600'; style.icon = <BadgeEuro size={20} />;
+                                style.label = 'Cuotas de Socio'; style.accent = 'bg-emerald-600';
+                            } else if (catName === 'Lotería') {
+                                style.bg = 'bg-amber-50'; style.text = 'text-amber-600'; style.icon = <Ticket size={20} />;
+                                style.label = 'Lotería'; style.accent = 'bg-amber-600';
+                            } else if (catName === 'Evento' || catName === 'Festejos/Actos') {
+                                style.bg = 'bg-indigo-50'; style.text = 'text-indigo-600'; style.icon = <Star size={20} />;
+                                style.label = 'Eventos y Actos'; style.accent = 'bg-indigo-600';
+                            }
 
-                            const getCategoryStyle = (type: string) => {
-                                switch (type) {
-                                    case 'Cuota': return { bg: 'bg-emerald-50', text: 'text-emerald-600', icon: <BadgeEuro size={20} />, label: 'Cuotas de Socio', accent: 'bg-emerald-600' };
-                                    case 'Lotería': return { bg: 'bg-amber-50', text: 'text-amber-600', icon: <Ticket size={20} />, label: 'Lotería', accent: 'bg-amber-600' };
-                                    case 'Evento': return { bg: 'bg-indigo-50', text: 'text-indigo-600', icon: <Star size={20} />, label: 'Eventos y Actos', accent: 'bg-indigo-600' };
-                                    default: return { bg: 'bg-gray-50', text: 'text-gray-600', icon: <Euro size={20} />, label: 'Otros Conceptos', accent: 'bg-gray-600' };
-                                }
-                            };
-
-                            const style = getCategoryStyle(catType);
+                            const subGroups = Array.from(new Set(catTransactions.map(t => t.subepigrafes?.nombre || t.subcategoria || 'Otros')));
 
                             const totalCobroCat = catTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
                             const totalPagoCat = catTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
                             const catPending = Math.max(0, totalCobroCat - totalPagoCat);
 
                             return (
-                                <section key={catType} className="animate-in fade-in slide-in-from-bottom-6 duration-1000">
+                                <section key={catName} className="animate-in fade-in slide-in-from-bottom-6 duration-1000">
                                     <div className="bg-white rounded-[40px] shadow-xl border border-gray-100 overflow-hidden">
                                         <div className={`px-10 py-8 ${style.bg} border-b border-gray-100 flex items-center justify-between relative overflow-hidden group/cat`}>
                                             <div className={`absolute top-0 left-0 w-2 h-full ${style.accent}`}></div>
@@ -328,29 +330,27 @@ export default function HistorialPage() {
                                         </div>
                                         <div className="divide-y divide-gray-50">
                                             {subGroups.map(subG => {
-                                                const subTransactions = catTransactions.filter(t => getSubGroupName(t.concepto, t.categoria || 'Varios') === subG);
+                                                const subTransactions = catTransactions.filter(t => (t.subepigrafes?.nombre || t.subcategoria || 'Otros') === subG);
                                                 const subTotalCobro = subTransactions.filter(t => t.tipo === 'cobro').reduce((acc, t) => acc + Number(t.monto), 0);
                                                 const subTotalPago = subTransactions.filter(t => t.tipo === 'pago').reduce((acc, t) => acc + Number(t.monto), 0);
                                                 const subPendiente = Math.max(0, subTotalCobro - subTotalPago);
 
                                                 return (
                                                     <div key={subG || 'root'} className="bg-white">
-                                                        {subG && (
-                                                            <div className="px-12 py-5 flex justify-between items-center border-b border-gray-50 bg-gray-50/5">
-                                                                <span className="text-sm font-black text-fila-dark uppercase tracking-widest flex items-center gap-2">
-                                                                    <div className={`w-1.5 h-1.5 rounded-full ${style.accent}`}></div>
-                                                                    {subG}
-                                                                </span>
-                                                                {subPendiente > 0 && (
-                                                                    <div className="flex items-center gap-2">
-                                                                        <AlertCircle size={14} className="text-red-500" />
-                                                                        <span className="text-[11px] font-black text-white bg-red-500 px-5 py-2 rounded-full shadow-lg shadow-red-100 uppercase tracking-widest">
-                                                                            Pendiente: {subPendiente.toFixed(2)}€
-                                                                        </span>
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        )}
+                                                        <div className="px-12 py-5 flex justify-between items-center border-b border-gray-50 bg-gray-50/5">
+                                                            <span className="text-sm font-black text-fila-dark uppercase tracking-widest flex items-center gap-2">
+                                                                <div className={`w-1.5 h-1.5 rounded-full ${style.accent}`}></div>
+                                                                {subG}
+                                                            </span>
+                                                            {subPendiente > 0 && (
+                                                                <div className="flex items-center gap-2">
+                                                                    <AlertCircle size={14} className="text-red-500" />
+                                                                    <span className="text-[11px] font-black text-white bg-red-500 px-5 py-2 rounded-full shadow-lg shadow-red-100 uppercase tracking-widest">
+                                                                        Pendiente: {subPendiente.toFixed(2)}€
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                         <div className="divide-y divide-gray-50">
                                                             {subTransactions.map((t) => (
                                                                 <div key={t.id} className="p-10 hover:bg-gray-50/50 transition-all flex items-center justify-between gap-6 group/row">

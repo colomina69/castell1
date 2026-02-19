@@ -21,6 +21,20 @@ interface Evento {
     precio_socio: number;
     precio_invitado: number;
     fecha_limite: string;
+    epigrafe_id?: string;
+    subepigrafe_id?: string;
+}
+
+interface Epigrafe {
+    id: string;
+    nombre: string;
+    tipo: string;
+}
+
+interface Subepigrafe {
+    id: string;
+    nombre: string;
+    epigrafe_id: string;
 }
 
 interface Inscripcion {
@@ -51,6 +65,8 @@ export default function AdminEventos() {
     const [newGroupName, setNewGroupName] = useState('');
     const [confirmAction, setConfirmAction] = useState<{ title: string, message: string, action: () => void } | null>(null);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [epigrafes, setEpigrafes] = useState<Epigrafe[]>([]);
+    const [subepigrafes, setSubepigrafes] = useState<Subepigrafe[]>([]);
 
     const router = useRouter();
     const pathname = usePathname();
@@ -65,7 +81,9 @@ export default function AdminEventos() {
         itinerario_desfile: '',
         precio_socio: '0',
         precio_invitado: '0',
-        fecha_limite: ''
+        fecha_limite: '',
+        epigrafe_id: '',
+        subepigrafe_id: ''
     });
 
     useEffect(() => {
@@ -135,8 +153,16 @@ export default function AdminEventos() {
         if (isAdmin) {
             fetchEventos();
             fetchGrupos();
+            fetchConfig();
         }
     }, [isAdmin]);
+
+    const fetchConfig = async () => {
+        const { data: epData } = await supabase.from('config_epigrafes').select('*').order('nombre');
+        const { data: subData } = await supabase.from('config_subepigrafes').select('*').order('nombre');
+        if (epData) setEpigrafes(epData);
+        if (subData) setSubepigrafes(subData);
+    };
 
     const fetchInscripciones = async (eventoId: string) => {
         const { data, error } = await supabase
@@ -167,7 +193,9 @@ export default function AdminEventos() {
             itinerario_desfile: form.desfile ? form.itinerario_desfile : null,
             precio_socio: parseFloat(form.precio_socio) || 0,
             precio_invitado: parseFloat(form.precio_invitado) || 0,
-            fecha_limite: form.fecha_limite || form.fecha
+            fecha_limite: form.fecha_limite || form.fecha,
+            epigrafe_id: form.epigrafe_id || null,
+            subepigrafe_id: form.subepigrafe_id || null
         };
 
         let result;
@@ -190,7 +218,9 @@ export default function AdminEventos() {
                 itinerario_desfile: '',
                 precio_socio: '0',
                 precio_invitado: '0',
-                fecha_limite: ''
+                fecha_limite: '',
+                epigrafe_id: '',
+                subepigrafe_id: ''
             });
             fetchEventos();
         } else {
@@ -225,7 +255,9 @@ export default function AdminEventos() {
             itinerario_desfile: evento.itinerario_desfile || '',
             precio_socio: evento.precio_socio.toString(),
             precio_invitado: evento.precio_invitado.toString(),
-            fecha_limite: evento.fecha_limite ? new Date(evento.fecha_limite).toISOString().slice(0, 16) : ''
+            fecha_limite: evento.fecha_limite ? new Date(evento.fecha_limite).toISOString().slice(0, 16) : '',
+            epigrafe_id: evento.epigrafe_id || '',
+            subepigrafe_id: evento.subepigrafe_id || ''
         });
         setIsModalOpen(true);
     };
@@ -581,6 +613,38 @@ export default function AdminEventos() {
                                                 className="w-full pl-12 pr-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none font-bold"
                                             />
                                         </div>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Relacionar con Epígrafe</label>
+                                        <select
+                                            value={form.epigrafe_id}
+                                            onChange={e => setForm({ ...form, epigrafe_id: e.target.value, subepigrafe_id: '' })}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold text-xs"
+                                        >
+                                            <option value="">Ninguno</option>
+                                            {epigrafes.map(ep => (
+                                                <option key={ep.id} value={ep.id}>{ep.nombre} ({ep.tipo})</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1.5">
+                                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest ml-1">Subcategoría</label>
+                                        <select
+                                            value={form.subepigrafe_id}
+                                            onChange={e => setForm({ ...form, subepigrafe_id: e.target.value })}
+                                            disabled={!form.epigrafe_id}
+                                            className="w-full px-5 py-3 rounded-2xl border border-gray-200 focus:border-fila-gold outline-none transition-all font-bold text-xs disabled:opacity-50"
+                                        >
+                                            <option value="">Ninguna</option>
+                                            {subepigrafes
+                                                .filter(s => s.epigrafe_id === form.epigrafe_id)
+                                                .map(sub => (
+                                                    <option key={sub.id} value={sub.id}>{sub.nombre}</option>
+                                                ))}
+                                        </select>
                                     </div>
                                 </div>
 

@@ -11,7 +11,8 @@ import {
     ArrowLeft,
     LogOut,
     Loader2,
-    LayoutDashboard
+    LayoutDashboard,
+    Settings
 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
@@ -125,6 +126,7 @@ export function AdminSidebar({ isMenuOpen, setIsMenuOpen }: AdminSidebarProps) {
                         <NavItem href="/admin/eventos" icon={Calendar} label="Gestión Eventos" />
                         <NavItem href="/admin/loteria" icon={Ticket} label="Gestión Lotería" />
                         <NavItem href="/admin/banco" icon={Euro} label="Punteo Bancario" />
+                        <NavItem href="/admin/configuracion" icon={Settings} label="Categorías Contables" />
                         <NavItem href="/admin?tab=balance" icon={LayoutDashboard} label="Balance Financiero" />
                     </nav>
 

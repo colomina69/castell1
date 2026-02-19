@@ -34,6 +34,8 @@ interface Evento {
     fecha: string;
     precio_socio: number;
     precio_invitado: number;
+    epigrafe_id?: string;
+    subepigrafe_id?: string;
 }
 
 interface Cuota {
@@ -41,6 +43,8 @@ interface Cuota {
     nombre: string;
     monto: number;
     descripcion?: string;
+    epigrafe_id?: string;
+    subepigrafe_id?: string;
 }
 
 interface Inscripcion {
@@ -61,6 +65,8 @@ interface TransactionState {
     estado: 'pendiente' | 'completado' | 'cancelado';
     is_automatic: boolean;
     concepto: string;
+    epigrafe_id?: string;
+    subepigrafe_id?: string;
 }
 
 export default function CobrosAdmin() {
@@ -151,7 +157,7 @@ export default function CobrosAdmin() {
     const fetchDebtsAndPayments = async (category: string, conceptFilter?: string) => {
         let query = supabase
             .from('pagos_cobros')
-            .select('id, socio_id, estado, concepto, monto, tipo, parent_id')
+            .select('id, socio_id, estado, concepto, monto, tipo, parent_id, epigrafe_id, subepigrafe_id')
             .eq('categoria', category);
 
         if (conceptFilter) {
@@ -171,7 +177,9 @@ export default function CobrosAdmin() {
                     pagado: 0,
                     estado: c.estado as any,
                     is_automatic: c.concepto.toLowerCase().includes('inscripción'),
-                    concepto: c.concepto
+                    concepto: c.concepto,
+                    epigrafe_id: c.epigrafe_id,
+                    subepigrafe_id: c.subepigrafe_id
                 };
                 dataMap[c.id] = state; // Map by Debt ID
                 dataMap[c.socio_id] = state; // Map by Socio ID (fallback)
@@ -252,7 +260,9 @@ export default function CobrosAdmin() {
                 monto: total,
                 concepto: `Evento: ${selectedEvento.denominacion} (${ins.numero_invitados} invitados)`,
                 categoria: 'Evento',
-                estado: 'pendiente'
+                estado: 'pendiente',
+                epigrafe_id: selectedEvento.epigrafe_id,
+                subepigrafe_id: selectedEvento.subepigrafe_id
             }])
             .select()
             .single();
@@ -302,7 +312,9 @@ export default function CobrosAdmin() {
                 categoria: activeTab === 'eventos' ? 'Evento' : activeTab === 'cuotas' ? 'Cuota' : 'Lotería',
                 estado: 'completado',
                 metodo_pago: paymentMethod,
-                parent_id: cargo.id
+                parent_id: cargo.id,
+                epigrafe_id: cargo.epigrafe_id,
+                subepigrafe_id: cargo.subepigrafe_id
             }])
             .select()
             .single();
@@ -348,7 +360,9 @@ export default function CobrosAdmin() {
                 monto: selectedCuota.monto,
                 concepto: `Cuota Anual ${new Date().getFullYear()}: ${selectedCuota.nombre}`, // Use selectedCuota
                 categoria: 'Cuota',
-                estado: 'pendiente'
+                estado: 'pendiente',
+                epigrafe_id: selectedCuota.epigrafe_id,
+                subepigrafe_id: selectedCuota.subepigrafe_id
             }])
             .select()
             .single();
